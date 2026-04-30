@@ -13,15 +13,420 @@
  * Requires: pdflatex (MiKTeX or TeX Live) on PATH.
  */
 
-import { readFile, stat, copyFile, rm } from 'fs/promises';
+import { readFile, writeFile, stat, copyFile, rm, readdir } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Escape plain text for safe insertion into a LaTeX document.
+// Order matters: backslash first, then the rest.
+function escapeLatex(s) {
+  return String(s)
+    .replace(/\\/g, '\\textbackslash{}')
+    .replace(/([&%$#_{}])/g, '\\$1')
+    .replace(/~/g, '\\textasciitilde{}')
+    .replace(/\^/g, '\\textasciicircum{}');
+}
+
+// Extract the body of a Markdown H2 section. Stops at the next H2 or EOF.
+function extractMarkdownSection(md, headingRegex) {
+  const m = md.match(headingRegex);
+  if (!m) return null;
+  const start = m.index + m[0].length;
+  const rest = md.slice(start);
+  const nextHeading = rest.match(/\n##\s/);
+  const end = nextHeading ? nextHeading.index : rest.length;
+  const body = rest.slice(0, end).trim();
+  return body || null;
+}
+
+// Return the first plain-text paragraph from a section body, skipping bullets,
+// code fences, tables and HTML-comment lines.
+function firstParagraph(body) {
+  if (!body) return null;
+  for (const p of body.split(/\n\s*\n/)) {
+    const t = p.trim();
+    if (!t) continue;
+    if (/^[-*+]\s/.test(t) || /^```/.test(t) || /^\|/.test(t) || /^<!--/.test(t)) continue;
+    return t.replace(/\n+/g, ' ').replace(/\s+/g, ' ');
+  }
+  return null;
+}
+
+// Source chain: explicit --report > most recent reports/*.md > cv.md.
+async function extractTailoredSummary({ scriptDir, reportFlag }) {
+  if (reportFlag) {
+    try {
+      const md = await readFile(resolve(reportFlag), 'utf-8');
+      const body = extractMarkdownSection(md, /^##\s+Tailored CV Summary\s*$/m)
+        || extractMarkdownSection(md, /^##\s+Summary\s*$/m);
+      const text = firstParagraph(body);
+      if (text) return { text, source: `report:${reportFlag}` };
+    } catch { /* fall through */ }
+  }
+
+  const reportsDir = resolve(scriptDir, 'reports');
+  try {
+    const names = (await readdir(reportsDir)).filter(f => f.endsWith('.md'));
+    const withMtime = await Promise.all(names.map(async f => {
+      const p = resolve(reportsDir, f);
+      return { path: p, name: f, mtime: (await stat(p)).mtimeMs };
+    }));
+    withMtime.sort((a, b) => b.mtime - a.mtime);
+    for (const r of withMtime) {
+      const md = await readFile(r.path, 'utf-8');
+      const body = extractMarkdownSection(md, /^##\s+Tailored CV Summary\s*$/m);
+      const text = firstParagraph(body);
+      if (text) return { text, source: `report:auto:${r.name}` };
+    }
+  } catch { /* fall through */ }
+
+  try {
+    const md = await readFile(resolve(scriptDir, 'cv.md'), 'utf-8');
+    const body = extractMarkdownSection(md, /^##\s+Summary\s*$/m);
+    const text = firstParagraph(body);
+    if (text) return { text, source: 'cv.md' };
+  } catch { /* nothing */ }
+
+  return null;
+}
+
+// Extract certification bullets from cv.md "## Certifications" section.
+// Returns array of raw strings (one per bullet). Empty array if section is
+// missing, empty, or contains no "- item" lines.
+function extractCertifications(md) {
+  const body = extractMarkdownSection(md, /^##\s+Certifications\s*$/m);
+  if (!body) return [];
+  const bullets = [];
+  for (const line of body.split('\n')) {
+    const m = line.match(/^\s*-\s+(.+?)\s*$/);
+    if (m) bullets.push(m[1]);
+  }
+  return bullets;
+}
+
+// Format certifications as middot-separated LaTeX one-liner (regular weight).
+// Empty array returns empty string (section renders title-only, per user spec).
+function formatCertificationsLatex(certs) {
+  if (!certs.length) return '';
+  return certs
+    .map(c => escapeLatex(c))
+    .join(' \\enspace$\\cdot$\\enspace ');
+}
+
+// Parse the CONTACT_LINE parts from profile.yml (identity block only).
+// Returns assembled LaTeX "phone $|$ city, country" (values LaTeX-escaped,
+// separator left raw as math-mode bar) or null if no fields available.
+// Visa status is intentionally excluded — it's an internal field for
+// sponsorship checks in oferta mode, not a CV-public field.
+function parseContactLine(yml) {
+  const identityMatch = yml.match(/^identity:\s*\n([\s\S]*?)(?=\n[a-zA-Z_]+:)/m);
+  const identity = identityMatch ? identityMatch[1] : yml;
+  const grab = (re) => identity.match(re)?.[1]?.trim();
+  const phone = grab(/^\s+phone:\s*["']?([^"'\n]+?)["']?\s*$/m);
+  const city = grab(/^\s+city:\s*["']?([^"'\n]+?)["']?\s*$/m);
+  const country = grab(/^\s+country:\s*["']?([^"'\n]+?)["']?\s*$/m);
+  const parts = [];
+  if (phone) parts.push(escapeLatex(phone));
+  const loc = [city, country].filter(Boolean).map(escapeLatex).join(', ');
+  if (loc) parts.push(loc);
+  return parts.length ? parts.join(' $|$ ') : null;
+}
+
+// Parse identity block from profile.yml for header placeholders.
+// Returns { name, email, linkedin, github } with raw values (URLs unmodified).
+// linkedin/github live under identity.links.* in profile.yml; we match by
+// indented key inside the identity block, agnostic to nesting depth.
+function parseHeaderIdentity(yml) {
+  const identityMatch = yml.match(/^identity:\s*\n([\s\S]*?)(?=\n[a-zA-Z_]+:)/m);
+  const identity = identityMatch ? identityMatch[1] : yml;
+  const grab = (re) => identity.match(re)?.[1]?.trim() || '';
+  return {
+    name: grab(/^\s+name:\s*["']?([^"'\n]+?)["']?\s*$/m),
+    email: grab(/^\s+email:\s*["']?([^"'\n]+?)["']?\s*$/m),
+    linkedin: grab(/^\s+linkedin:\s*["']?([^"'\n]+?)["']?\s*$/m),
+    github: grab(/^\s+github:\s*["']?([^"'\n]+?)["']?\s*$/m),
+  };
+}
+
+// Strip protocol, www., and trailing slashes from a URL for display text.
+// Empty input returns empty string.
+function urlToDisplay(url) {
+  if (!url) return '';
+  return String(url).replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/+$/, '');
+}
+
+// ---- SKILLS (from cv.md "## Technical Skills") ----
+function extractSkills(md) {
+  const body = extractMarkdownSection(md, /^##\s+Technical Skills\s*$/m);
+  if (!body) return [];
+  const skills = [];
+  for (const line of body.split('\n')) {
+    const m = line.match(/^\s*-\s+\*\*([^:*]+):\*\*\s*(.+?)\s*$/);
+    if (m) skills.push({ category: m[1].trim(), items: m[2].trim() });
+  }
+  return skills;
+}
+
+function formatSkillsLatex(skills) {
+  if (!skills.length) return '';
+  return skills
+    .map((s, i) => {
+      const line = `    \\textbf{${escapeLatex(s.category)}}{: ${escapeLatex(s.items)}}`;
+      return i < skills.length - 1 ? `${line} \\\\` : line;
+    })
+    .join('\n');
+}
+
+// ---- EDUCATION (from cv.md "## Education") ----
+function extractEducation(md) {
+  const body = extractMarkdownSection(md, /^##\s+Education\s*$/m);
+  if (!body) return [];
+  const entries = [];
+  const chunks = body.split(/\n(?=###\s)/);
+  for (const chunk of chunks) {
+    const headingMatch = chunk.match(/^###\s+(.+?)\s*$/m);
+    if (!headingMatch) continue;
+    const degree = headingMatch[1].trim();
+    const grab = (re) => chunk.match(re)?.[1]?.trim() || '';
+    entries.push({
+      degree,
+      institution: grab(/^\*\*Institution:\*\*\s*(.+?)\s*$/m),
+      location: grab(/^\*\*Location:\*\*\s*(.+?)\s*$/m),
+      dates: grab(/^\*\*Dates:\*\*\s*(.+?)\s*$/m),
+    });
+  }
+  return entries;
+}
+
+function formatEducationLatex(entries) {
+  if (!entries.length) return '';
+  return entries
+    .map(e => (
+      `    \\resumeSubheading\n` +
+      `      {${escapeLatex(e.institution)}}{${escapeLatex(e.dates)}}\n` +
+      `      {${escapeLatex(e.degree)}}{${escapeLatex(e.location)}}`
+    ))
+    .join('\n\n');
+}
+
+// ---- RELEVANCE SELECTION (from report "## Relevance Selection (for CV generation)") ----
+function normalizeForMatch(s) {
+  return String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function extractRelevanceSelection(md) {
+  const result = { experience: [], projects: [] };
+  if (!md) return result;
+  const rsBody = extractMarkdownSection(md, /^##\s+Relevance Selection.*$/m);
+  if (!rsBody) return result;
+
+  const parseSubsection = (headingRe) => {
+    const m = rsBody.match(headingRe);
+    if (!m) return [];
+    const after = rsBody.slice(m.index + m[0].length);
+    const nextH3 = after.match(/\n###\s/);
+    const subBody = nextH3 ? after.slice(0, nextH3.index) : after;
+    const entries = [];
+    for (const line of subBody.split('\n')) {
+      const lm = line.match(/^\s*\d+\.\s+(.+?)\s+\((primary|secondary|excluded)\)/);
+      if (lm) entries.push({ name: lm[1].trim(), tag: lm[2], order: entries.length });
+    }
+    return entries;
+  };
+
+  result.experience = parseSubsection(/^###\s+Experience\s*$/m);
+  result.projects = parseSubsection(/^###\s+Projects\s*$/m);
+  return result;
+}
+
+// Apply selection: included (primary+secondary) in report order, then cv.md
+// entries NOT mentioned as safety-net fallback at tail. Excluded-tagged
+// entries are skipped entirely.
+function applySelection(cvEntries, selectionList, getName) {
+  if (!selectionList.length) {
+    return { ordered: cvEntries, info: { selected: 0, fallback: cvEntries.length } };
+  }
+  const findCvEntry = (selName) => {
+    const sn = normalizeForMatch(selName);
+    return cvEntries.find(e => {
+      const en = normalizeForMatch(getName(e));
+      return en.includes(sn) || sn.includes(en);
+    });
+  };
+
+  const ordered = [];
+  const matched = new Set();
+  const excludedSet = new Set();
+
+  for (const sel of selectionList) {
+    const entry = findCvEntry(sel.name);
+    if (!entry) continue;
+    if (sel.tag === 'excluded') {
+      excludedSet.add(entry);
+    } else if (!matched.has(entry)) {
+      ordered.push(entry);
+      matched.add(entry);
+    }
+  }
+  const selectedCount = ordered.length;
+
+  let fallback = 0;
+  for (const entry of cvEntries) {
+    if (!matched.has(entry) && !excludedSet.has(entry)) {
+      ordered.push(entry);
+      matched.add(entry);
+      fallback++;
+    }
+  }
+
+  return { ordered, info: { selected: selectedCount, fallback } };
+}
+
+// Load report markdown for selection parsing: explicit --report > auto-detect most recent.
+async function loadReportForSelection({ scriptDir, reportFlag }) {
+  if (reportFlag) {
+    try { return await readFile(resolve(reportFlag), 'utf-8'); } catch { /* fall through */ }
+  }
+  const reportsDir = resolve(scriptDir, 'reports');
+  try {
+    const names = (await readdir(reportsDir)).filter(f => f.endsWith('.md'));
+    const withMtime = await Promise.all(names.map(async f => {
+      const p = resolve(reportsDir, f);
+      return { path: p, mtime: (await stat(p)).mtimeMs };
+    }));
+    withMtime.sort((a, b) => b.mtime - a.mtime);
+    if (withMtime[0]) return await readFile(withMtime[0].path, 'utf-8');
+  } catch { /* no reports/ */ }
+  return null;
+}
+
+// ---- EXPERIENCE (from cv.md "## Experience") ----
+function extractExperience(md) {
+  const body = extractMarkdownSection(md, /^##\s+Experience\s*$/m);
+  if (!body) return [];
+  const entries = [];
+  const chunks = body.split(/\n(?=###\s)/);
+  for (const chunk of chunks) {
+    const headingMatch = chunk.match(/^###\s+(.+?)\s*$/m);
+    if (!headingMatch) continue;
+    const role = headingMatch[1].trim();
+    const grab = (re) => chunk.match(re)?.[1]?.trim() || '';
+    const bullets = [];
+    for (const line of chunk.split('\n')) {
+      const bm = line.match(/^-\s+(.+?)\s*$/);
+      if (bm) bullets.push(bm[1].trim());
+    }
+    entries.push({
+      role,
+      company: grab(/^\*\*Company:\*\*\s*(.+?)\s*$/m),
+      location: grab(/^\*\*Location:\*\*\s*(.+?)\s*$/m),
+      dates: grab(/^\*\*Dates:\*\*\s*(.+?)\s*$/m),
+      bullets,
+    });
+  }
+  return entries;
+}
+
+function formatExperienceLatex(entries) {
+  if (!entries.length) return '';
+  return entries
+    .map(e => {
+      const items = e.bullets.map(b => `        \\resumeItem{${escapeLatex(b)}}`).join('\n');
+      return (
+        `    \\resumeSubheading\n` +
+        `      {${escapeLatex(e.role)}}{${escapeLatex(e.dates)}}\n` +
+        `      {${escapeLatex(e.company)}}{${escapeLatex(e.location)}}\n` +
+        `      \\resumeItemListStart\n` +
+        items + '\n' +
+        `      \\resumeItemListEnd`
+      );
+    })
+    .join('\n\n');
+}
+
+// ---- PROJECTS (from cv.md "## Projects") — Opzione D link placement ----
+function extractProjects(md) {
+  const body = extractMarkdownSection(md, /^##\s+Projects\s*$/m);
+  if (!body) return [];
+  const entries = [];
+  const chunks = body.split(/\n(?=###\s)/);
+  for (const chunk of chunks) {
+    const headingMatch = chunk.match(/^###\s+(.+?)\s*$/m);
+    if (!headingMatch) continue;
+    const titleRaw = headingMatch[1].trim();
+    let name = titleRaw, descriptor = '';
+    const emDashSplit = titleRaw.split(/\s+—\s+/);
+    if (emDashSplit.length >= 2) {
+      name = emDashSplit[0].trim();
+      descriptor = emDashSplit.slice(1).join(' — ').trim();
+    }
+    const grab = (re) => chunk.match(re)?.[1]?.trim() || '';
+    const recognition = grab(/^\*\*Recognition:\*\*\s*(.+?)\s*$/m);
+    const date = grab(/^\*\*Date:\*\*\s*(.+?)\s*$/m);
+    const linkLine = grab(/^\*\*Link:\*\*\s*(.+?)\s*$/m);
+    const link = linkLine ? linkLine.split(/\s+—\s+|\s+/)[0] : '';
+
+    // Description: first non-metadata, non-bullet, non-blank paragraph
+    let description = '';
+    const lines = chunk.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i].trim();
+      if (!l || l.startsWith('###') || l.match(/^\*\*[^:*]+:\*\*/) || l.startsWith('-')) continue;
+      description = l;
+      let j = i + 1;
+      while (j < lines.length) {
+        const nl = lines[j].trim();
+        if (!nl || nl.startsWith('-') || nl.match(/^\*\*[^:*]+:\*\*/)) break;
+        description += ' ' + nl;
+        j++;
+      }
+      break;
+    }
+
+    const metaBullets = [];
+    for (const line of chunk.split('\n')) {
+      const bm = line.match(/^\s*-\s+\*\*([^:*]+):\*\*\s*(.+?)\s*$/);
+      if (bm) metaBullets.push({ key: bm[1].trim(), value: bm[2].trim() });
+    }
+
+    entries.push({ name, descriptor, recognition, date, link, description, metaBullets });
+  }
+  return entries;
+}
+
+function formatProjectsLatex(entries) {
+  if (!entries.length) return '';
+  return entries
+    .map(p => {
+      let titleContent = escapeLatex(p.name);
+      if (p.descriptor) titleContent += ` \\emph{$|$ ${escapeLatex(p.descriptor)}}`;
+      const title = p.link
+        ? `\\href{${p.link}}{\\color{BrandPrimary}\\faGithub\\ ${titleContent}}`
+        : titleContent;
+      const badge = escapeLatex(p.recognition || p.date || '');
+      const items = [];
+      if (p.description) items.push(`        \\resumeItem{${escapeLatex(p.description)}}`);
+      for (const mb of p.metaBullets) {
+        items.push(`        \\resumeItem{\\textbf{${escapeLatex(mb.key)}:} ${escapeLatex(mb.value)}}`);
+      }
+      return (
+        `    \\resumeProjectHeading{${title}}{${badge}}\n` +
+        `    \\resumeItemListStart\n` +
+        items.join('\n') + '\n' +
+        `    \\resumeItemListEnd`
+      );
+    })
+    .join('\n\n');
+}
 
 const REQUIRED_SECTIONS = [
   '\\\\section{Education}',
-  '\\\\section{Work Experience}',
-  '\\\\section{Personal Projects}',
+  '\\\\section{Experience}',
+  '\\\\section{Projects}',
   '\\\\section{Technical Skills}',
 ];
 
@@ -32,10 +437,20 @@ const REQUIRED_COMMANDS = [
 ];
 
 async function main() {
-  const inputPath = process.argv[2];
-  const outputPath = process.argv[3]; // optional
+  // Parse positional args (skip any --flag=... tokens)
+  const positional = [];
+  let reportFlag = null;
+  for (const arg of process.argv.slice(2)) {
+    if (arg.startsWith('--report=')) {
+      reportFlag = arg.slice('--report='.length);
+    } else if (!arg.startsWith('--')) {
+      positional.push(arg);
+    }
+  }
+  const inputPath = positional[0];
+  const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf]');
+    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>]');
     process.exit(1);
   }
 
@@ -46,6 +461,180 @@ async function main() {
   } catch (err) {
     console.error(`Error reading ${absPath}: ${err.message}`);
     process.exit(1);
+  }
+
+  // --- {{SUMMARY}} substitution (pre-validation) ---
+  // Runs only if the .tex still contains the placeholder. Source chain:
+  //   --report=<path> > most recent reports/*.md with "## Tailored CV Summary" > cv.md "## Summary"
+  // Mutates the input .tex in place so xelatex consumes the resolved file.
+  let summarySource = null;
+  if (content.includes('{{SUMMARY}}')) {
+    const summary = await extractTailoredSummary({
+      scriptDir: __dirname,
+      reportFlag,
+    });
+    if (summary) {
+      content = content.replace(/\{\{SUMMARY\}\}/g, escapeLatex(summary.text));
+      await writeFile(absPath, content, 'utf-8');
+      summarySource = summary.source;
+    }
+  }
+
+  // --- {{CERTIFICATIONS}} substitution (pre-validation) ---
+  // Source: cv.md "## Certifications" only (no tailoring per role, no source chain).
+  // Missing/empty section => empty string (template section renders title-only).
+  let certificationsSource = null;
+  if (content.includes('{{CERTIFICATIONS}}')) {
+    let certs = [];
+    try {
+      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      certs = extractCertifications(md);
+      certificationsSource = certs.length ? `cv.md:${certs.length}` : 'cv.md:empty';
+    } catch {
+      certificationsSource = 'cv.md:missing';
+    }
+    const rendered = formatCertificationsLatex(certs);
+    content = content.replace(/\{\{CERTIFICATIONS\}\}/g, rendered);
+    await writeFile(absPath, content, 'utf-8');
+  }
+
+  // --- {{CONTACT_LINE}} substitution (pre-validation) ---
+  // Source: config/profile.yml identity block (phone + city + country).
+  // Visa/work authorization is intentionally excluded (internal-only field).
+  // Values are LaTeX-escaped; the "$|$" math-mode separator is preserved raw.
+  let contactLineSource = null;
+  if (content.includes('{{CONTACT_LINE}}')) {
+    try {
+      const yml = await readFile(resolve(__dirname, 'config/profile.yml'), 'utf-8');
+      const line = parseContactLine(yml);
+      if (line) {
+        content = content.replace(/\{\{CONTACT_LINE\}\}/g, line);
+        await writeFile(absPath, content, 'utf-8');
+        contactLineSource = 'profile.yml';
+      } else {
+        contactLineSource = 'profile.yml:empty';
+      }
+    } catch {
+      contactLineSource = 'profile.yml:missing';
+    }
+  }
+
+  // --- Header identity placeholders (NAME, EMAIL_*, LINKEDIN_*, GITHUB_*) ---
+  // Source: config/profile.yml identity block (name, email, links.linkedin,
+  // links.github). URLs are inserted raw inside \href{URL}{...}; display
+  // text inside the second \href argument is LaTeX-escaped. NAME is escaped.
+  // headerSource: 'profile.yml' (all 4 fields), 'profile.yml:partial' (1-3),
+  // 'profile.yml:missing' (file unreadable or 0 fields).
+  const HEADER_PLACEHOLDERS = [
+    '{{NAME}}', '{{EMAIL_URL}}', '{{EMAIL_DISPLAY}}',
+    '{{LINKEDIN_URL}}', '{{LINKEDIN_DISPLAY}}',
+    '{{GITHUB_URL}}', '{{GITHUB_DISPLAY}}',
+  ];
+  let headerSource = null;
+  if (HEADER_PLACEHOLDERS.some(p => content.includes(p))) {
+    try {
+      const yml = await readFile(resolve(__dirname, 'config/profile.yml'), 'utf-8');
+      const id = parseHeaderIdentity(yml);
+      const present = [id.name, id.email, id.linkedin, id.github].filter(Boolean).length;
+      if (present === 4) headerSource = 'profile.yml';
+      else if (present > 0) headerSource = 'profile.yml:partial';
+      else headerSource = 'profile.yml:missing';
+
+      if (id.name) content = content.replace(/\{\{NAME\}\}/g, escapeLatex(id.name));
+      if (id.email) {
+        content = content.replace(/\{\{EMAIL_URL\}\}/g, id.email);
+        content = content.replace(/\{\{EMAIL_DISPLAY\}\}/g, escapeLatex(id.email));
+      }
+      if (id.linkedin) {
+        content = content.replace(/\{\{LINKEDIN_URL\}\}/g, id.linkedin);
+        content = content.replace(/\{\{LINKEDIN_DISPLAY\}\}/g, escapeLatex(urlToDisplay(id.linkedin)));
+      }
+      if (id.github) {
+        content = content.replace(/\{\{GITHUB_URL\}\}/g, id.github);
+        content = content.replace(/\{\{GITHUB_DISPLAY\}\}/g, escapeLatex(urlToDisplay(id.github)));
+      }
+      await writeFile(absPath, content, 'utf-8');
+    } catch {
+      headerSource = 'profile.yml:missing';
+    }
+  }
+
+  // --- {{SKILLS}} substitution (cv.md "## Technical Skills") ---
+  let skillsSource = null;
+  if (content.includes('{{SKILLS}}')) {
+    try {
+      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const skills = extractSkills(md);
+      content = content.replace(/\{\{SKILLS\}\}/g, formatSkillsLatex(skills));
+      skillsSource = skills.length ? `cv.md:${skills.length}` : 'cv.md:empty';
+    } catch {
+      skillsSource = 'cv.md:missing';
+      content = content.replace(/\{\{SKILLS\}\}/g, '');
+    }
+    await writeFile(absPath, content, 'utf-8');
+  }
+
+  // --- {{EDUCATION}} substitution (cv.md "## Education") ---
+  let educationSource = null;
+  if (content.includes('{{EDUCATION}}')) {
+    try {
+      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const entries = extractEducation(md);
+      content = content.replace(/\{\{EDUCATION\}\}/g, formatEducationLatex(entries));
+      educationSource = entries.length ? `cv.md:${entries.length}` : 'cv.md:empty';
+    } catch {
+      educationSource = 'cv.md:missing';
+      content = content.replace(/\{\{EDUCATION\}\}/g, '');
+    }
+    await writeFile(absPath, content, 'utf-8');
+  }
+
+  // --- Relevance Selection: load once, shared between EXPERIENCE and PROJECTS ---
+  // Same report resolution chain as SUMMARY: explicit --report > most recent.
+  let relevanceSelection = { experience: [], projects: [] };
+  if (content.includes('{{EXPERIENCE}}') || content.includes('{{PROJECTS}}')) {
+    const reportMd = await loadReportForSelection({ scriptDir: __dirname, reportFlag });
+    if (reportMd) relevanceSelection = extractRelevanceSelection(reportMd);
+  }
+
+  // --- {{EXPERIENCE}} substitution (cv.md content + optional report-driven selection) ---
+  let experienceSource = null;
+  let experienceSelected = null;
+  if (content.includes('{{EXPERIENCE}}')) {
+    try {
+      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const all = extractExperience(md);
+      experienceSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
+      const { ordered, info } = applySelection(all, relevanceSelection.experience, e => e.company);
+      if (relevanceSelection.experience.length) {
+        experienceSelected = `selected:${info.selected}+fallback:${info.fallback}`;
+      }
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, formatExperienceLatex(ordered));
+    } catch {
+      experienceSource = 'cv.md:missing';
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, '');
+    }
+    await writeFile(absPath, content, 'utf-8');
+  }
+
+  // --- {{PROJECTS}} substitution (cv.md content + optional report-driven selection, Opzione D) ---
+  let projectsSource = null;
+  let projectsSelected = null;
+  if (content.includes('{{PROJECTS}}')) {
+    try {
+      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const all = extractProjects(md);
+      projectsSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
+      const { ordered, info } = applySelection(all, relevanceSelection.projects, p => p.name);
+      if (relevanceSelection.projects.length) {
+        projectsSelected = `selected:${info.selected}+fallback:${info.fallback}`;
+      }
+      content = content.replace(/\{\{PROJECTS\}\}/g, formatProjectsLatex(ordered));
+    } catch {
+      projectsSource = 'cv.md:missing';
+      content = content.replace(/\{\{PROJECTS\}\}/g, '');
+    }
+    await writeFile(absPath, content, 'utf-8');
   }
 
   const issues = [];
@@ -110,6 +699,16 @@ async function main() {
     },
     issues,
     valid: issues.length === 0,
+    ...(summarySource && { summarySource }),
+    ...(certificationsSource && { certificationsSource }),
+    ...(contactLineSource && { contactLineSource }),
+    ...(headerSource && { headerSource }),
+    ...(skillsSource && { skillsSource }),
+    ...(educationSource && { educationSource }),
+    ...(experienceSource && { experienceSource }),
+    ...(experienceSelected && { experienceSelected }),
+    ...(projectsSource && { projectsSource }),
+    ...(projectsSelected && { projectsSelected }),
   };
 
   // If validation fails, report and exit
@@ -118,7 +717,7 @@ async function main() {
     process.exit(1);
   }
 
-  // --- Compile .tex → .pdf via pdflatex ---
+  // --- Compile .tex → .pdf via xelatex ---
   const texDir = dirname(absPath);
   const texBase = basename(absPath, '.tex');
   const defaultPdf = join(texDir, `${texBase}.pdf`);
@@ -130,25 +729,32 @@ async function main() {
     mkdirSync(targetDir, { recursive: true });
   }
 
+  // Compile directly to the target path via -jobname to avoid collisions at
+  // the default `<tex-basename>.pdf` location (e.g. a PDF emitted earlier from
+  // the HTML pipeline sharing the same basename and held open by a viewer).
+  // When no explicit output is given, jobname falls back to the tex basename
+  // so behavior is unchanged.
+  const jobname = basename(targetPdf, '.pdf');
+
   try {
-    // Run pdflatex twice for cross-references (standard practice)
     const pdflatexArgs = [
       '-no-shell-escape',
       '-interaction=nonstopmode',
       '-halt-on-error',
-      `-output-directory=${texDir}`,
+      `-output-directory=${targetDir}`,
+      `-jobname=${jobname}`,
       absPath,
     ];
 
     // First pass
-    execFileSync('pdflatex', pdflatexArgs, {
+    execFileSync('xelatex', pdflatexArgs, {
       cwd: texDir,
       stdio: 'pipe',
       timeout: 120_000,
     });
 
     // Second pass (resolves references)
-    execFileSync('pdflatex', pdflatexArgs, {
+    execFileSync('xelatex', pdflatexArgs, {
       cwd: texDir,
       stdio: 'pipe',
       timeout: 120_000,
@@ -156,8 +762,8 @@ async function main() {
 
     report.compiled = true;
   } catch (err) {
-    // Try to extract useful error from pdflatex log
-    const logPath = join(texDir, `${texBase}.log`);
+    // Try to extract useful error from xelatex log (under jobname in targetDir)
+    const logPath = join(targetDir, `${jobname}.log`);
     let latexError = err.message;
     try {
       const log = await readFile(logPath, 'utf-8');
@@ -171,28 +777,23 @@ async function main() {
     report.compileError = latexError;
   }
 
-  // Post-compile: move PDF and clean up (separate from compile errors)
+  // Post-compile: stat the PDF at its already-final location and clean aux files.
+  // No copy step needed — -jobname already wrote the PDF directly to targetPdf.
   if (report.compiled) {
     try {
-      // Move PDF to target location if different
-      if (resolve(defaultPdf) !== resolve(targetPdf)) {
-        await copyFile(defaultPdf, targetPdf);
-        await rm(defaultPdf).catch(() => {});
-      }
-
       const pdfStat = await stat(targetPdf);
       report.pdf = {
         path: targetPdf,
         sizeKB: parseFloat((pdfStat.size / 1024).toFixed(1)),
       };
     } catch (err) {
-      report.postCompileError = `Failed to finalize PDF: ${err.message}`;
+      report.postCompileError = `Failed to stat output PDF: ${err.message}`;
     }
 
-    // Clean up auxiliary files (best-effort)
+    // Clean up auxiliary files (best-effort) — under jobname in targetDir
     const auxExts = ['.aux', '.log', '.out', '.fls', '.fdb_latexmk', '.synctex.gz'];
     for (const ext of auxExts) {
-      await rm(join(texDir, `${texBase}${ext}`)).catch(() => {});
+      await rm(join(targetDir, `${jobname}${ext}`)).catch(() => { });
     }
   }
 

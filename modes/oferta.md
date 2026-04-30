@@ -193,6 +193,36 @@ Guardar evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ---
 
+## Relevance Selection (for CV generation)
+
+Lista ordinata di quali Experience e Projects includere nel CV generato per QUESTA specifica JD. `generate-latex.mjs` legge questa sezione per popolare `{{EXPERIENCE}}` e `{{PROJECTS}}` del template LaTeX. Formato obbligatorio:
+
+```markdown
+### Experience
+1. Company Name (primary) — rationale breve (perché questa esperienza è rilevante per il ruolo)
+2. Company Name (secondary) — rationale
+3. Company Name (excluded) — rationale (perché off-topic)
+
+### Projects
+1. Project Name (primary) — rationale
+2. Project Name (secondary) — rationale
+3. Project Name (excluded) — rationale
+```
+
+**Tag semantici:**
+- `(primary)` — include nel CV, primo blocco (match 1:1 con JD)
+- `(secondary)` — include nel CV, blocchi successivi (adjacent o di supporto)
+- `(excluded)` — non emesso nel CV (off-topic per il ruolo)
+
+**Regole di scelta:**
+- Company name match case-insensitive, substring (es. "Computes Group" matcha "Computes Group Srl" in cv.md)
+- Project name match su nome prima dell'em-dash (es. "Sherpa Alzheimer" matcha il progetto con descriptor "Multi-Agent RAG Chatbot")
+- Se una entry di cv.md NON è menzionata qui, viene inclusa come fallback in coda (safety net)
+- Ordine delle entries primary+secondary = ordine di emissione nel CV
+
+## Tailored CV Summary
+(un paragrafo — 3-4 frasi — nella lingua del JD, con keyword injection + exit narrative bridge. Plain text, niente bullet/tabelle/markdown. Deve essere pronto al drop-in per PDF Professional Summary e LaTeX {{SUMMARY}} placeholder. `generate-latex.mjs` lo legge automaticamente da questa sezione.)
+
 ## Keywords extraídas
 (lista de 15-20 keywords del JD para ATS optimization)
 ```

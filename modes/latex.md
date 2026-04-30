@@ -14,7 +14,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 8. Select top 3-4 most relevant projects for the offer
 9. Reorder experience bullets by JD relevance
 10. Inject keywords naturally into existing achievements
-11. Generate the `.tex` file using `templates/cv-template.tex`
+11. Copy `templates/cv-template.tex` to the output path. Do NOT fill any placeholder by hand — `generate-latex.mjs` resolves all of them via in-place writeFile from `cv.md`, `config/profile.yml`, and the most recent `reports/*.md`.
 12. Write to `output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex`
 13. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
@@ -23,22 +23,63 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 
 ## Template Placeholders
 
-The template at `templates/cv-template.tex` uses `{{PLACEHOLDER}}` syntax:
+The template at `templates/cv-template.tex` uses `{{PLACEHOLDER}}` syntax. Placeholders fall into two categories: **auto-resolved by `generate-latex.mjs`** (deterministic parsing from cv.md, profile.yml, or the report) and **LLM-populated** (written by the agent when generating the .tex). Currently every placeholder is Auto-resolved; the LLM-populated category is kept as a scaffold for future placeholders that may require role-specific tailoring.
 
-| Placeholder | Source |
-|-------------|--------|
-| `{{NAME}}` | `profile.yml → candidate.full_name` |
-| `{{CONTACT_LINE}}` | Phone / City, State / Visa status — built from profile.yml |
-| `{{EMAIL_URL}}` | Raw email for `mailto:` URL — must not be LaTeX-escaped (from profile.yml) |
-| `{{EMAIL_DISPLAY}}` | Escaped email for display text — LaTeX-special chars like `_` must be escaped, e.g. `first\_name@example.com` |
-| `{{LINKEDIN_URL}}` | Full URL with scheme for `\href{}`: e.g. `https://linkedin.com/in/username`. If `profile.yml` stores a bare host+path (no scheme), prepend `https://` before substitution. |
-| `{{LINKEDIN_DISPLAY}}` | Display text only (no scheme): `linkedin.com/in/username` |
-| `{{GITHUB_URL}}` | Full URL with scheme for `\href{}`: e.g. `https://github.com/username`. If `profile.yml` stores a bare host+path, prepend `https://`. |
-| `{{GITHUB_DISPLAY}}` | Display text only (no scheme): `github.com/username` |
-| `{{EDUCATION}}` | LaTeX `\resumeSubheading` blocks from cv.md Education section |
-| `{{EXPERIENCE}}` | LaTeX `\resumeSubheading` + `\resumeItem` blocks — reordered bullets |
-| `{{PROJECTS}}` | LaTeX `\resumeProjectHeading` + `\resumeItem` blocks — top 3-4 selected |
-| `{{SKILLS}}` | LaTeX `\textbf{Category}{: items}` lines from cv.md Technical Skills |
+### Auto-resolved (do NOT fill manually — leave as placeholder in .tex)
+
+| Placeholder | Source | Details |
+|-------------|--------|---------|
+| `{{SUMMARY}}` | report `## Tailored CV Summary` > auto-detect reports/ > cv.md `## Summary` | Tailored per JD. Chain: explicit `--report=<path>` flag > most recent `reports/*.md` by mtime > cv.md fallback. LaTeX-escaped. |
+| `{{CERTIFICATIONS}}` | cv.md `## Certifications` | Middot-separated one-liner (regular weight, no bold). Empty if section missing. |
+| `{{NAME}}` | profile.yml `identity.name` | LaTeX-escaped. |
+| `{{EMAIL_URL}}` | profile.yml `identity.email` | Raw value injected inside `\href{mailto:...}{}` — NOT LaTeX-escaped. |
+| `{{EMAIL_DISPLAY}}` | profile.yml `identity.email` | Same value as `{{EMAIL_URL}}`, LaTeX-escaped for the `\href` display argument. |
+| `{{LINKEDIN_URL}}` | profile.yml `identity.links.linkedin` | Raw URL injected inside `\href{...}{}` — NOT LaTeX-escaped. |
+| `{{LINKEDIN_DISPLAY}}` | profile.yml `identity.links.linkedin` | URL stripped of `https://`, `www.`, and trailing `/`; LaTeX-escaped. |
+| `{{GITHUB_URL}}` | profile.yml `identity.links.github` | Raw URL injected inside `\href{...}{}` — NOT LaTeX-escaped. |
+| `{{GITHUB_DISPLAY}}` | profile.yml `identity.links.github` | URL stripped of `https://`, `www.`, and trailing `/`; LaTeX-escaped. |
+| `{{CONTACT_LINE}}` | profile.yml `identity` block | Format: `phone $|$ city, country`. Visa field **intentionally excluded** — it's internal-only for sponsorship checks in oferta mode. |
+| `{{SKILLS}}` | cv.md `## Technical Skills` | One `\textbf{Category}{: items} \\` line per bullet in the markdown list. |
+| `{{EDUCATION}}` | cv.md `## Education` | `\resumeSubheading{Institution}{Dates}{Degree}{Location}` per H3 entry. |
+| `{{EXPERIENCE}}` | cv.md `## Experience` + report `## Relevance Selection` → `### Experience` | 2-step: parse all entries from cv.md, then filter/reorder by tag (`primary`/`secondary` included, `excluded` skipped, unmentioned = tail fallback). Matching by Company name, case-insensitive substring. |
+| `{{PROJECTS}}` | cv.md `## Projects` + report `## Relevance Selection` → `### Projects` | Same 2-step as Experience. Link rendering: **Opzione D** — title wrapped in `\href{URL}{\color{BrandPrimary}\faGithub\ Name \emph{$|$ Descriptor}}`. Multi-link in cv.md: first URL only. Missing Recognition falls back to Date; missing both renders empty right-side badge. |
+
+### LLM-populated (fill when writing the .tex)
+
+Currently empty — all placeholders are auto-resolved by `generate-latex.mjs`. This section is reserved for any future placeholder that requires manual LLM tailoring per role (e.g. role-specific summaries that can't be auto-generated).
+
+### CLI flags
+
+- `--report=<path>` — explicit report path for SUMMARY and Relevance Selection resolution. Overrides auto-detect.
+
+### JSON output fields (per invocation)
+
+`generate-latex.mjs` emits a JSON report. New fields to track auto-resolution:
+
+- `summarySource` — `"report:<path>"` / `"report:auto:<name>"` / `"cv.md"` or absent
+- `certificationsSource` — `"cv.md:<N>"` / `"cv.md:empty"` / `"cv.md:missing"`
+- `headerSource` — `"profile.yml"` (all four of name/email/linkedin/github found) / `"profile.yml:partial"` (at least one missing) / `"profile.yml:missing"` (file unreadable or `identity` block absent)
+- `contactLineSource` — `"profile.yml"` / `"profile.yml:empty"` / `"profile.yml:missing"`
+- `skillsSource`, `educationSource`, `experienceSource`, `projectsSource` — `"cv.md:<N>"` counts
+- `experienceSelected`, `projectsSelected` — `"selected:<N>+fallback:<M>"` when Relevance Selection was applied; omitted when no selection
+
+### Relevance Selection (report side)
+
+The mode `oferta` writes a `## Relevance Selection (for CV generation)` section in each report with sub-sections `### Experience` and `### Projects`. Format:
+
+```
+### Experience
+1. Company Name (primary) — rationale
+2. Company Name (secondary) — rationale
+3. Company Name (excluded) — rationale
+```
+
+Tags: `(primary)` / `(secondary)` / `(excluded)`. The script:
+- Includes primary + secondary entries in report order
+- Skips excluded entries entirely
+- Appends any cv.md entry not mentioned in selection as tail safety-net (preserves full ground-truth if selection is incomplete)
+
+This lets a single cv.md generate different CVs per JD (e.g., Prompt Engineer role emits Sherpa+Mental+LisAI; Data Scientist role emits Malaria+Drug+Sherpa) with zero LLM drift on content.
 
 ## LaTeX Content Generation Rules
 

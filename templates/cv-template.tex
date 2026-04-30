@@ -1,16 +1,42 @@
 %-------------------------
-% Career-Ops LaTeX CV Template
-% Based on: Gabriel Sison / sb2nov resume template
-% License: MIT
+% Career-Ops LaTeX CV Template — Vicio Di Cara (personalized v3.1)
+% Based on: sb2nov resume template (career-ops original) + Vicio's visual style
+%
+% v3.1 Changelog (over v3):
+%   - \resumeProjectHeading macro now auto-prepends \needspace to discourage
+%     mid-project page splits (Malaria split fix).
+%   - All other v3 improvements preserved.
+%
+% v3 Changelog:
+%   - Removed \input{glyphtounicode} and \pdfgentounicode=1 (pdfTeX-only)
+%   - Added Certifications section
+%   - Renamed sections: Work Experience -> Experience, Personal Projects -> Projects
+%
+% Compiler: XeLaTeX (NOT pdflatex)
+% License: MIT (inherits from career-ops original)
 %------------------------
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Random Stuff %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\documentclass[letterpaper,11pt]{article}
+\documentclass[a4paper,11pt]{article}
+
+%-------------------------  PACKAGES  -------------------------
+\usepackage{fontspec}
+
+%-------------------------  FONT SETUP  -------------------------
+\setmainfont{Figtree}[
+  Path           = C:/Users/vicio/AppData/Local/Microsoft/Windows/Fonts/,
+  Extension      = .ttf,
+  UprightFont    = Figtree-Regular,
+  BoldFont       = Figtree-Bold,
+  ItalicFont     = Figtree-Italic,
+  BoldItalicFont = Figtree-BoldItalic,
+  Ligatures      = TeX,
+]
+%-------------------------  OTHER PACKAGES  -------------------------
 \usepackage{latexsym}
 \usepackage[empty]{fullpage}
 \usepackage{titlesec}
 \usepackage{marvosym}
-\usepackage[usenames,dvipsnames]{color}
+\usepackage[dvipsnames,table]{xcolor}
 \usepackage{verbatim}
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
@@ -19,105 +45,157 @@
 \usepackage{tabularx}
 \usepackage{fontawesome5}
 \usepackage{multicol}
+\usepackage{ragged2e}
+\usepackage{needspace}
+
 \setlength{\multicolsep}{-3.0pt}
 \setlength{\columnsep}{-1pt}
-\input{glyphtounicode}
+
+% NOTE: \input{glyphtounicode} and \pdfgentounicode=1 REMOVED for XeLaTeX
+
+%-------------------------  BRAND COLORS  -------------------------
+\definecolor{BrandPrimary}{HTML}{0070AD}
+\definecolor{BrandAccent}{HTML}{12ABDB}
+\definecolor{TextDark}{HTML}{1A1A2E}
+\definecolor{TextMuted}{HTML}{555555}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=BrandPrimary,
+  urlcolor=BrandPrimary,
+  citecolor=BrandPrimary
+}
+
+%-------------------------  HEADER / FOOTER  -------------------------
 \pagestyle{fancy}
-\fancyhf{} % clear all header and footer fields
+\fancyhf{}
 \fancyfoot{}
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
-% Adjust margins
+
+%-------------------------  MARGINS  -------------------------
 \addtolength{\oddsidemargin}{-0.6in}
 \addtolength{\evensidemargin}{-0.5in}
 \addtolength{\textwidth}{1.19in}
 \addtolength{\topmargin}{-.7in}
 \addtolength{\textheight}{1.4in}
+
 \urlstyle{same}
 \raggedbottom
 \raggedright
 \setlength{\tabcolsep}{0in}
-% Sections formatting
-\titleformat{\section}{
-  \vspace{-7pt}\scshape\raggedright\large\bfseries
-}{}{0em}{}[\color{black}\titlerule \vspace{0pt}]
-% Ensure that generate pdf is machine readable/ATS parsable
-\pdfgentounicode=1
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Commands  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  SECTION FORMATTING  -------------------------
+\titleformat{\section}{
+  \vspace{-4pt}
+  \color{BrandPrimary}
+  \scshape
+  \raggedright
+  \large
+  \bfseries
+}{}{0em}{}[\color{BrandAccent}\titlerule \vspace{-2pt}]
+
+%-------------------------  MACROS  -------------------------
 \newcommand{\resumeItem}[1]{
   \item\small{
     {#1 \vspace{-3pt}}
   }
 }
+
 \newcommand{\resumeSubheading}[4]{
   \vspace{-3pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & \textbf{\small #2} \\
-      \textit{\small#3} & \textit{\small #4} \\
+      \textbf{\color{TextDark}#1} & \textbf{\small #2} \\
+      \textit{\small #3} & \textit{\small #4} \\
     \end{tabular*}\vspace{-7pt}
 }
+
 \newcommand{\resumeSubheadingContinue}[2]{
   \vspace{-3pt}
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textit{\small#1} & \textit{\small #2} \\
+      \textit{\small #1} & \textit{\small #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+
+% v3.1 — auto-needspace prefix to reduce mid-project page splits.
+% Reserves ~6 baseline-heights of vertical space; if not available, page break.
 \newcommand{\resumeProjectHeading}[2]{
+  \needspace{6\baselineskip}%
   \vspace{-3pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & \textbf{\small #2} \\
+      \textbf{\color{TextDark}#1} & \textbf{\small #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+
 \newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{0pt}}
+
 \renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
 \renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
 \newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
 \newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
 \newcommand{\resumeItemListStart}{\begin{itemize}}
 \newcommand{\resumeItemListEnd}{\end{itemize}\vspace{0pt}}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Heading  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  DOCUMENT  -------------------------
 \begin{document}
-    \begin{center}
-        % NAME
-        {\Huge\scshape {{NAME}}}
-        % SUBHEADING
-        \\ {{CONTACT_LINE}}\\
-        \small
-        % EMAIL
-        \href{mailto:{{EMAIL_URL}}}{\raisebox{-0.2\height}\faEnvelope\  \underline{{{EMAIL_DISPLAY}}}} ~
-        % LINKEDIN
-        \href{{{LINKEDIN_URL}}}{\raisebox{-0.2\height}\faLinkedin\ \underline{{{LINKEDIN_DISPLAY}}}}  ~
-        % GITHUB
-        \href{{{GITHUB_URL}}}{\raisebox{-0.2\height}\faGithub\ \underline{{{GITHUB_DISPLAY}}}}
-    \end{center}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Education  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  HEADER  -------------------------
+\begin{center}
+    {\Huge\scshape\bfseries\color{BrandPrimary} {{NAME}}}
+    \\ \vspace{4pt}
+    {\small {{CONTACT_LINE}}}\\
+    \vspace{2pt}
+    \small
+    \href{mailto:{{EMAIL_URL}}}{\raisebox{-0.1\height}\faEnvelope\ {{EMAIL_DISPLAY}}}
+    \enspace$\cdot$\enspace
+    \href{{{LINKEDIN_URL}}}{\raisebox{-0.1\height}\faLinkedin\ {{LINKEDIN_DISPLAY}}}
+    \enspace$\cdot$\enspace
+    \href{{{GITHUB_URL}}}{\raisebox{-0.1\height}\faGithub\ {{GITHUB_DISPLAY}}}
+\end{center}
+
+\vspace{-4pt}
+
+%-------------------------  SUMMARY  -------------------------
+\section{Summary}
+\vspace{-2pt}
+{\small {{SUMMARY}}}
+\vspace{2pt}
+
+%-------------------------  EXPERIENCE  -------------------------
+\section{Experience}
+  \resumeSubHeadingListStart
+{{EXPERIENCE}}
+  \resumeSubHeadingListEnd
+
+%-------------------------  PROJECTS  -------------------------
+\section{Projects}
+\resumeSubHeadingListStart
+{{PROJECTS}}
+\resumeSubHeadingListEnd
+
+%-------------------------  TECHNICAL SKILLS  -------------------------
+\section{Technical Skills}
+\vspace{-7pt}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \small{\item{
+{{SKILLS}}
+  }}
+\end{itemize}
+
+%-------------------------  EDUCATION  -------------------------
 \section{Education}
   \resumeSubHeadingListStart
 {{EDUCATION}}
   \resumeSubHeadingListEnd
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Experience  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Work Experience}
-  \resumeSubHeadingListStart
-{{EXPERIENCE}}
-  \resumeSubHeadingListEnd
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  PROJECTS  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Personal Projects}
-\resumeSubHeadingListStart
-{{PROJECTS}}
-\resumeSubHeadingListEnd
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Technical Skills}
+%-------------------------  CERTIFICATIONS  -------------------------
+\section{Certifications}
 \vspace{-7pt}
-\begin{itemize}
-[leftmargin=0.15in, label={}]\small{\item{
-{{SKILLS}}
-}}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \small{\item{
+{{CERTIFICATIONS}}
+  }}
 \end{itemize}
 
 \end{document}

@@ -41,3 +41,13 @@ bun.lock
 .claude/memory/
 career-dashboard
 package-lock.json
+
+# Local backups created by Claude Code or manual snapshots
+*.backup
+*.backup-*
+*.bak
+cv.md.backup-*
+
+# Personal data not for the public fork
+cv.md
+article-digest.md

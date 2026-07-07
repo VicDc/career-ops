@@ -1,16 +1,44 @@
+% WARNING: this file MUST keep its {{...}} placeholders. If they are replaced by real content, the generator burned them (bug) — restore from git/_FROM_GIT.tex.
 %-------------------------
-% Career-Ops LaTeX CV Template
-% Based on: Gabriel Sison / sb2nov resume template
-% License: MIT
+% Career-Ops LaTeX CV Template — Vic (personalized v3.1)
+% Based on: sb2nov resume template (career-ops original) + Vic's visual style
+%
+% v3.1 Changelog (over v3):
+%   - \resumeProjectHeading macro now auto-prepends \needspace to discourage
+%     mid-project page splits (Malaria split fix).
+%   - All other v3 improvements preserved.
+%
+% v3 Changelog:
+%   - Removed \input{glyphtounicode} and \pdfgentounicode=1 (pdfTeX-only)
+%   - Added Certifications section
+%   - Renamed sections: Work Experience -> Experience, Personal Projects -> Projects
+%
+% Compiler: XeLaTeX (NOT pdflatex)
+% License: MIT (inherits from career-ops original)
 %------------------------
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Random Stuff %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\documentclass[letterpaper,11pt]{article}
+\documentclass[a4paper,11pt]{article}
+
+%-------------------------  PACKAGES  -------------------------
+\usepackage{fontspec}
+
+%-------------------------  FONT SETUP  -------------------------
+%-------------------------  FONT SETUP  -------------------------
+% Figtree — download: https://fonts.google.com/specimen/Figtree (OFL license)
+% Uses the system-installed Figtree if present; otherwise falls back to the
+% default font so the CV still compiles on any machine.
+\IfFontExistsTF{Figtree}{%
+  \setmainfont{Figtree}[Ligatures=TeX]%
+}{%
+  % Figtree not installed system-wide — compiling with default font.
+  % To use Figtree, install it from https://fonts.google.com/specimen/Figtree
+}%
+%-------------------------  OTHER PACKAGES  -------------------------
 \usepackage{latexsym}
 \usepackage[empty]{fullpage}
 \usepackage{titlesec}
 \usepackage{marvosym}
-\usepackage[usenames,dvipsnames]{color}
+\usepackage[dvipsnames,table]{xcolor}
 \usepackage{verbatim}
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
@@ -19,105 +47,170 @@
 \usepackage{tabularx}
 \usepackage{fontawesome}
 \usepackage{multicol}
+\usepackage{ragged2e}
+\usepackage{needspace}
+
 \setlength{\multicolsep}{-3.0pt}
 \setlength{\columnsep}{-1pt}
-\input{glyphtounicode}
+
+% NOTE: \input{glyphtounicode} and \pdfgentounicode=1 REMOVED for XeLaTeX
+
+%-------------------------  BRAND COLORS  -------------------------
+\definecolor{BrandPrimary}{HTML}{000F07}   %{0070AD}
+\definecolor{BrandAccent}{HTML}{6A46EC}   %{12ABDB}
+\definecolor{TextDark}{HTML}{212121}     %{1A1A2E}
+\definecolor{TextMuted}{HTML}{6B7280}   %{555555}
+\AtBeginDocument{\color{BrandPrimary}}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=BrandPrimary,
+  urlcolor=TextDark,
+  citecolor=BrandPrimary
+}
+
+%-------------------------  HEADER / FOOTER  -------------------------
 \pagestyle{fancy}
-\fancyhf{} % clear all header and footer fields
+\fancyhf{}
 \fancyfoot{}
 \renewcommand{\headrulewidth}{0pt}
 \renewcommand{\footrulewidth}{0pt}
-% Adjust margins
+
+%-------------------------  MARGINS  -------------------------
 \addtolength{\oddsidemargin}{-0.6in}
 \addtolength{\evensidemargin}{-0.5in}
 \addtolength{\textwidth}{1.19in}
 \addtolength{\topmargin}{-.7in}
 \addtolength{\textheight}{1.4in}
+
 \urlstyle{same}
 \raggedbottom
 \raggedright
 \setlength{\tabcolsep}{0in}
-% Sections formatting
-\titleformat{\section}{
-  \vspace{-7pt}\scshape\raggedright\large\bfseries
-}{}{0em}{}[\color{black}\titlerule \vspace{0pt}]
-% Ensure that generate pdf is machine readable/ATS parsable
-\pdfgentounicode=1
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Commands  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  SECTION FORMATTING  -------------------------
+\titleformat{\section}{
+  \vspace{-4pt}
+  \color{TextDark}
+  \scshape  \raggedright
+  \large
+  \bfseries
+}{}{0em}{}[\color{BrandAccent}\titlerule \vspace{-2pt}]
+
+%-------------------------  MACROS  -------------------------
 \newcommand{\resumeItem}[1]{
   \item\small{
     {#1 \vspace{-3pt}}
   }
 }
+
 \newcommand{\resumeSubheading}[4]{
   \vspace{-3pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & \textbf{\small #2} \\
-      \textit{\small#3} & \textit{\small #4} \\
+      \textbf{\color{TextDark}#1} & {\color{TextMuted}\textbf{\small #2}} \\
+      \textit{\small #3} & {\color{TextMuted}\textit{\small #4}} \\
     \end{tabular*}\vspace{-7pt}
 }
+
 \newcommand{\resumeSubheadingContinue}[2]{
   \vspace{-3pt}
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textit{\small#1} & \textit{\small #2} \\
+      \textit{\small #1} & \textit{\small #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+
+% v3.1 — auto-needspace prefix to reduce mid-project page splits.
+% Reserves ~6 baseline-heights of vertical space; if not available, page break.
 \newcommand{\resumeProjectHeading}[2]{
+  \needspace{6\baselineskip}%
   \vspace{-3pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
-      \textbf{#1} & \textbf{\small #2} \\
+      \textbf{\color{TextDark}#1} & \textbf{\small #2} \\
     \end{tabular*}\vspace{-7pt}
 }
+
+% v3.2 — project heading with GitHub icon + clickable project title.
+% Use this for any project that has a public repo URL.
+%   #1 = project name (LaTeX-escaped)   #2 = repo URL (raw, NOT escaped)
+%   #3 = context, e.g. "$|$ Automated Parasite Detection" (escaped)
+%   #4 = right-aligned badge/date (escaped)
+\newcommand{\resumeProjectHeadingLink}[4]{
+  \needspace{6\baselineskip}%
+  \vspace{-3pt}\item
+    \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{{\color{BrandAccent}\faGithub}\ \href{#2}{\color{TextDark}#1}\ \emph{\small\color{TextMuted}#3}} & \textbf{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
 \newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{0pt}}
+
 \renewcommand\labelitemi{$\vcenter{\hbox{\tiny$\bullet$}}$}
 \renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
 \newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.0in, label={}]}
 \newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
 \newcommand{\resumeItemListStart}{\begin{itemize}}
 \newcommand{\resumeItemListEnd}{\end{itemize}\vspace{0pt}}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Heading  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  DOCUMENT  -------------------------
 \begin{document}
-    \begin{center}
-        % NAME
-        {\Huge\scshape {{NAME}}}
-        % SUBHEADING
-        \\ {{CONTACT_LINE}}\\
-        \small
-        % EMAIL
-        \href{mailto:{{EMAIL_URL}}}{\raisebox{-0.2\height}\faEnvelope\  \underline{{{EMAIL_DISPLAY}}}} ~
-        % LINKEDIN
-        \href{{{LINKEDIN_URL}}}{\raisebox{-0.2\height}\faLinkedin\ \underline{{{LINKEDIN_DISPLAY}}}}  ~
-        % GITHUB
-        \href{{{GITHUB_URL}}}{\raisebox{-0.2\height}\faGithub\ \underline{{{GITHUB_DISPLAY}}}}
-    \end{center}
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Education  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%-------------------------  HEADER  -------------------------
+\begin{center}
+    {\Huge\scshape\bfseries\color{TextDark} {{NAME}}}
+    \\ \vspace{4pt}
+    {\small {{CONTACT_LINE}}}\\
+    \vspace{2pt}
+    \small
+    {\color{BrandAccent}\raisebox{-0.1\height}\faEnvelope}\ \href{mailto:{{EMAIL_URL}}}{{{EMAIL_DISPLAY}}}
+    \enspace$\cdot$\enspace
+    {\color{BrandAccent}\raisebox{-0.1\height}\faLinkedin}\ \href{{{LINKEDIN_URL}}}{{{LINKEDIN_DISPLAY}}}
+    \enspace$\cdot$\enspace
+    {\color{BrandAccent}\raisebox{-0.1\height}\faGithub}\ \href{{{GITHUB_URL}}}{{{GITHUB_DISPLAY}}}
+\end{center}
+
+\vspace{-4pt}
+
+%-------------------------  SUMMARY  -------------------------
+\section{Summary}
+\vspace{-2pt}
+{\small {{SUMMARY}}}
+\vspace{2pt}
+
+%-------------------------  PROJECTS  -------------------------
+\section{Projects}
+\resumeSubHeadingListStart
+{{PROJECTS}}
+\resumeSubHeadingListEnd
+
+%-------------------------  EXPERIENCE  -------------------------
+\section{Experience}
+  \resumeSubHeadingListStart
+{{EXPERIENCE}}
+  \resumeSubHeadingListEnd
+  
+%-------------------------  TECHNICAL SKILLS  -------------------------
+\section{Technical Skills}
+\vspace{-7pt}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \small{\item{
+{{SKILLS}}
+  }}
+\end{itemize}
+
+%-------------------------  EDUCATION  -------------------------
 \section{Education}
   \resumeSubHeadingListStart
 {{EDUCATION}}
   \resumeSubHeadingListEnd
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Experience  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Work Experience}
-  \resumeSubHeadingListStart
-{{EXPERIENCE}}
-  \resumeSubHeadingListEnd
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  PROJECTS  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Personal Projects}
-\resumeSubHeadingListStart
-{{PROJECTS}}
-\resumeSubHeadingListEnd
-
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%  Technical Skills  %%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Technical Skills}
+%-------------------------  CERTIFICATIONS  -------------------------
+\section{Certifications}
 \vspace{-7pt}
-\begin{itemize}
-[leftmargin=0.15in, label={}]\small{\item{
-{{SKILLS}}
-}}
+\begin{itemize}[leftmargin=0.15in, label={}]
+  \small{\item{
+{{CERTIFICATIONS}}
+  }}
 \end{itemize}
 
 \end{document}

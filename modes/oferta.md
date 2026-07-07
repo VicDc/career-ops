@@ -212,9 +212,37 @@ Apply all language rules from `_shared.md` Professional Writing section to the d
 
 ---
 
+## Relevance Selection (for CV generation)
+
+Ordered list of which Experience and Projects to include in the CV generated for THIS specific JD. `generate-latex.mjs` reads this section to populate the `{{EXPERIENCE}}` and `{{PROJECTS}}` placeholders of the LaTeX template. Required format in the report:
+
+```markdown
+### Experience
+1. Company Name (primary) - short rationale (why this experience is relevant to the role)
+2. Company Name (secondary) - rationale
+3. Company Name (excluded) - rationale (why off-topic)
+### Projects
+1. Project Name (primary) - rationale
+2. Project Name (secondary) - rationale
+3. Project Name (excluded) - rationale
+```
+
+**Semantic tags:**
+- `(primary)` - included in the CV, first block (1:1 match with the JD)
+- `(secondary)` - included in the CV, later blocks (adjacent or supporting)
+- `(excluded)` - not emitted in the CV (off-topic for the role)
+
+**Selection rules:**
+- Company name match is case-insensitive, substring (e.g. "Computes Group" matches "Computes Group Srl" in cv.md)
+- Project name matches on the name before the em-dash (e.g. "Sherpa Alzheimer" matches the project with its descriptor)
+- If a cv.md entry is NOT mentioned here, it is included as a tail fallback (safety net)
+- Order of primary+secondary entries = emission order in the CV
+
+---
+
 ## Post-evaluation
 
-**ALWAYS** after generating blocks A-G:
+**ALWAYS** after generating blocks A-J:
 
 ### 1. Save report .md
 
@@ -258,6 +286,12 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## G) Posting Legitimacy
 (full content of block G)
+
+## Relevance Selection (for CV generation)
+(ordered list of Experience and Projects with primary/secondary/excluded tags - see instruction block)
+
+## Tailored CV Summary
+(one paragraph, 3-4 sentences, in the JD language, keyword-injected, plain text - drop-in for {{SUMMARY}})
 
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)

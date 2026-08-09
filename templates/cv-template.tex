@@ -104,7 +104,11 @@
   }
 }
 
+% v3.3 — same auto-needspace guard as the project headings (v3.1), so an
+% Experience/Education subheading never lands alone at the foot of a page
+% with its bullets orphaned onto the next one.
 \newcommand{\resumeSubheading}[4]{
+  \needspace{6\baselineskip}%
   \vspace{-3pt}\item
     \begin{tabular*}{1.0\textwidth}[t]{l@{\extracolsep{\fill}}r}
       \textbf{\color{TextDark}#1} & {\color{TextMuted}\textbf{\small #2}} \\

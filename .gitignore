@@ -22,6 +22,11 @@ jds/*
 !jds/.gitkeep
 config/profile_vicio-dc.txt
 article-digest.md
+/scripts/*.ps1
+/.backups/
+!backups/.gitkeep
+/modes/_custom.md
+/voice-dna.md
 
 # Interview prep (accumulated STAR+R stories — user data)
 interview-prep/*

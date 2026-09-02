@@ -97,6 +97,26 @@
   \bfseries
 }{}{0em}{}[\color{BrandAccent}\titlerule \vspace{-2pt}]
 
+% v3.2 — needspace guard on the section header itself.
+% The guards inside \resumeSubheading / \resumeProjectHeading fire only AFTER
+% \section and \resumeSubHeadingListStart have been typeset, so they break the
+% page below an already-placed title and strand it at the foot of the page.
+% Reserve the title, its rule, the list's topsep AND the 6 baselines the first
+% entry claims, so the header always travels with its first entry.
+%
+% Two details this depends on, both found the hard way:
+%   1. \Needspace* (starred), not \needspace. This document sets \raggedbottom,
+%      and plain \needspace bails out silently whenever \pagegoal is still
+%      \maxdimen because the page builder has not run yet. It measured nothing:
+%      even 20\baselineskip changed no page break. The starred variant is the
+%      one documented for \raggedbottom. The leading \par forces vertical mode.
+%   2. Wrapped at \AtBeginDocument. titlesec installs its own \section at
+%      begin-document, so a preamble \renewcommand gets overwritten.
+\AtBeginDocument{%
+  \let\ecvoldsection\section
+  \renewcommand{\section}[1]{\par\Needspace*{11\baselineskip}\ecvoldsection{#1}}%
+}
+
 %-------------------------  MACROS  -------------------------
 \newcommand{\resumeItem}[1]{
   \item\small{

@@ -27,6 +27,8 @@
     "ollama:eval": "node ollama-eval.mjs",
     "star": "node match-star.mjs",
     "archive": "node archive-posting.mjs",
+    "ublock:check": "node ublock.mjs check",
+    "ublock:install": "node ublock.mjs install",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
   },
   "keywords": [

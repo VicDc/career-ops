@@ -23,7 +23,12 @@ export const LIVENESS_CONTEXT_OPTIONS = {
 
 // Open a page in a context that already presents a realistic UA. Both callers use
 // this instead of browser.newPage() so headless checks aren't instantly bot-walled.
+//
+// Accepts either a Browser or a persistent BrowserContext (the extension path in
+// browser-extensions.mjs). A persistent context has no newContext(); it already
+// carries LIVENESS_CONTEXT_OPTIONS from launch, so newPage() is enough.
 export async function newLivenessPage(browser) {
+  if (typeof browser.newContext !== 'function') return browser.newPage();
   const context = await browser.newContext(LIVENESS_CONTEXT_OPTIONS);
   return context.newPage();
 }

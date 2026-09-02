@@ -23,7 +23,9 @@ import {
   newLivenessPage,
   jitteredDelayMs,
   sleep,
+  LIVENESS_CONTEXT_OPTIONS,
 } from './liveness-browser.mjs';
+import { launchBrowser } from './browser-extensions.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 
 async function main() {
@@ -65,7 +67,7 @@ async function main() {
   let browser = null, page = null, headed = null;
   async function ensureBrowser() {
     if (browser) return;
-    browser = await chromium.launch({ headless: true });
+    browser = await launchBrowser(chromium, { contextOptions: LIVENESS_CONTEXT_OPTIONS });
     page = await newLivenessPage(browser);
     headed = noFallback ? null : createHeadedPageProvider(chromium);
   }

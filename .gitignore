@@ -55,6 +55,9 @@ modes/_profile.md
 # Generated
 .resolved-prompt-*
 node_modules/
+
+# Unpacked browser extension downloaded by ublock.mjs — a build artifact, not source
+vendor/ublock-lite/
 bun.lock
 # Report-number reservation sentinels (ephemeral, created by reserve-report-num.mjs)
 reports/*-RESERVED.md

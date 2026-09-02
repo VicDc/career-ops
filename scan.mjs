@@ -613,9 +613,12 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
   let newLivenessPage;
   let jitteredDelayMs;
   let sleep;
+  let LIVENESS_CONTEXT_OPTIONS;
+  let launchBrowser;
   try {
     ({ chromium } = await import('playwright'));
-    ({ checkUrlLiveness, checkUrlLivenessWithFallback, createHeadedPageProvider, newLivenessPage, jitteredDelayMs, sleep } = await import('./liveness-browser.mjs'));
+    ({ checkUrlLiveness, checkUrlLivenessWithFallback, createHeadedPageProvider, newLivenessPage, jitteredDelayMs, sleep, LIVENESS_CONTEXT_OPTIONS } = await import('./liveness-browser.mjs'));
+    ({ launchBrowser } = await import('./browser-extensions.mjs'));
   } catch (err) {
     throw new Error(
       `--verify requires Playwright with Chromium (run "npx playwright install chromium"): ${err.message}`,
@@ -625,7 +628,7 @@ async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0
 
   let browser;
   try {
-    browser = await chromium.launch({ headless: true });
+    browser = await launchBrowser(chromium, { contextOptions: LIVENESS_CONTEXT_OPTIONS });
   } catch (err) {
     throw new Error(
       `--verify could not launch Chromium (run "npx playwright install chromium" or re-run without --verify): ${err.message}`,

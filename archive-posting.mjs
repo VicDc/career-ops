@@ -17,6 +17,7 @@
  */
 
 import { chromium } from 'playwright';
+import { launchBrowser } from './browser-extensions.mjs';
 import { writeFile, readFile } from 'fs/promises';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
@@ -302,7 +303,7 @@ async function main() {
     }
   } else {
     // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    const browser = await launchBrowser(chromium);
     try {
       for (const { url, company, role } of targets) {
         try {

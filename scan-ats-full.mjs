@@ -216,10 +216,11 @@ async function parallelEach(items, limit, fn) {
 // ── Liveness verification (reuses liveness-browser.mjs) ────────────
 
 async function filterLive(offers) {
-  let chromium, checkUrlLiveness, newLivenessPage;
+  let chromium, checkUrlLiveness, newLivenessPage, LIVENESS_CONTEXT_OPTIONS, launchBrowser;
   try {
     ({ chromium } = await import('playwright'));
-    ({ checkUrlLiveness, newLivenessPage } = await import('./liveness-browser.mjs'));
+    ({ checkUrlLiveness, newLivenessPage, LIVENESS_CONTEXT_OPTIONS } = await import('./liveness-browser.mjs'));
+    ({ launchBrowser } = await import('./browser-extensions.mjs'));
   } catch (err) {
     throw new Error(
       `--liveness requires Playwright with Chromium (run "npx playwright install chromium"): ${err.message}`,
@@ -227,7 +228,7 @@ async function filterLive(offers) {
     );
   }
   console.error(`\nVerifying liveness of ${offers.length} match(es) with Playwright (sequential)...`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await launchBrowser(chromium, { contextOptions: LIVENESS_CONTEXT_OPTIONS });
   const live = [];
   try {
     const page = await newLivenessPage(browser);

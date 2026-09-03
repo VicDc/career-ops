@@ -9,15 +9,19 @@
  * Run: node analyze-patterns.mjs          (JSON to stdout)
  *      node analyze-patterns.mjs --summary (human-readable table)
  *      node analyze-patterns.mjs --min-threshold 3
+ *      node analyze-patterns.mjs --min-vendor-n 8   (per-vendor sample floor)
  *      node analyze-patterns.mjs --self-test
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, existsSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
+import { join, dirname, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { load as yamlLoad } from 'js-yaml';
+import { resolveColumns, parseTrackerRow, normalizeVia } from './tracker-parse.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
 const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
   ? join(CAREER_OPS, 'data/applications.md')
   : join(CAREER_OPS, 'applications.md');
@@ -41,6 +45,23 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   'seniority',
   'remote',
   'team_size',
+  // Issue 1380: predicted skip/discard reasons from the agent.
+  'discard_reasons',
+  'advertised_comp',
+  'via',
+  'company_confidential',
+  'risk_summary',
+  // Work-authorization / visa-sponsorship tier from Block A (report + Machine
+  // Summary only). Allowlisted so it round-trips; no consumer logic yet.
+  'work_auth',
+  // Reporting line stated by the JD, verbatim (report + Machine Summary only).
+  // Allowlisted so it round-trips; no consumer logic yet.
+  'reports_to',
+  // Block B's requirement -> importance table, mirrored row by row (evidence
+  // tier, importance band, match). Allowlisted so it round-trips; no consumer
+  // logic yet, deliberately: importance is score-neutral, so nothing that folds
+  // historical scores may start reading it without its own design pass.
+  'requirement_importance',
 ]);
 
 // --- CLI args ---
@@ -50,6 +71,17 @@ const minThresholdIdx = args.indexOf('--min-threshold');
 const MIN_THRESHOLD = minThresholdIdx !== -1 && args[minThresholdIdx + 1] !== undefined
   ? (Number.isNaN(parseInt(args[minThresholdIdx + 1])) ? 5 : parseInt(args[minThresholdIdx + 1]))
   : 5;
+
+// Minimum per-vendor sample before a channel-yield recommendation fires. Kept
+// modest (small trackers) but high enough that one unlucky bucket isn't a claim.
+const minVendorNIdx = args.indexOf('--min-vendor-n');
+const MIN_VENDOR_N = (() => {
+  if (minVendorNIdx === -1 || args[minVendorNIdx + 1] === undefined) return 8;
+  const n = parseInt(args[minVendorNIdx + 1], 10);
+  // Reject 0/negative: a floor of 0 makes sufficientSample always true and
+  // silently defeats the "don't claim on noise" guard the whole feature rests on.
+  return Number.isNaN(n) || n < 1 ? 8 : n;
+})();
 
 // --- Status normalization (mirrors verify-pipeline.mjs) ---
 const ALIASES = {
@@ -61,6 +93,7 @@ const ALIASES = {
   'entrevista': 'interview',
   'oferta': 'offer',
   'rechazado': 'rejected', 'rechazada': 'rejected',
+  'contratado': 'hired', 'contratada': 'hired', 'accepted': 'hired', 'accept': 'hired',
   'descartado': 'discarded', 'descartada': 'discarded',
   'cerrada': 'discarded', 'cancelada': 'discarded',
   'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
@@ -72,13 +105,170 @@ function normalizeStatus(raw) {
   return ALIASES[clean] || clean;
 }
 
-function classifyOutcome(status) {
+export function classifyOutcome(status) {
   const s = normalizeStatus(status);
-  if (['interview', 'offer', 'responded', 'applied'].includes(s)) return 'positive';
-  if (['rejected', 'discarded'].includes(s)) return 'negative';
-  if (['skip'].includes(s)) return 'self_filtered';
+  // 'hired' is the strongest positive outcome — a landed job. It must not fall
+  // through to the 'pending' default, which would drag conversion rates down.
+  if (['hired', 'interview', 'offer', 'responded'].includes(s)) return 'positive';
+  // 'applied' is SENT, not answered: denominator only, never the numerator.
+  // Mirrors ADVANCED_STATUSES, which already excludes it.
+  if (s === 'applied') return 'awaiting';
+  if (s === 'rejected') return 'negative';
+  // Withdrawn by the candidate or the posting died: neither a submission the
+  // canonical funnel counts (stats.mjs) nor an employer decision.
+  if (s === 'discarded') return 'discarded';
+  if (s === 'skip') return 'self_filtered';
   return 'pending'; // evaluated
 }
+
+// --- Rate denominators ---
+//
+// A frequency is only meaningful against the population that could have
+// produced it. Both counters below exist because `enriched.length` — EVERY
+// tracker row — was standing in for two much smaller populations, silently
+// deflating every derived percentage and the thresholds computed from them.
+//
+// Entries eligible to carry a discard/skip reason. A 'pending' (Evaluated,
+// never acted on) or 'positive' row has no reason to state, so counting it in
+// the base only dilutes the share. Must stay in lockstep with the filter that
+// guards the discard-reason harvest loop.
+function discardableBase(enriched) {
+  return enriched.filter(e => REASON_BEARING.has(e.outcome)).length;
+}
+
+// Entries that actually carry gaps, i.e. the ones a blocker can be extracted
+// from. Entries whose report has no gaps (or no report at all) can never
+// contribute a blocker and must not pad the denominator.
+function gapBearingBase(enriched) {
+  return enriched.filter(e => e.report?.gaps?.length > 0).length;
+}
+
+// Outcome buckets a breakdown row carries. Kept in one place so a new bucket
+// cannot be added to classifyOutcome without every counter learning about it —
+// `entry[outcome]++` on a missing key silently writes NaN.
+export const OUTCOME_BUCKETS = ['positive', 'awaiting', 'negative', 'discarded', 'self_filtered', 'pending'];
+// Buckets whose rows can carry a skip/discard reason or a blocker: the base for
+// discard-reason shares and the source of blocker / tech-gap harvesting.
+const REASON_BEARING = new Set(['negative', 'discarded', 'self_filtered']);
+
+// Sample floors for the prescriptive recommendations. Small on purpose: they
+// do not claim statistical confidence, they stop a single row from becoming
+// an instruction ("avoid X", "set the threshold at Y").
+// A prescription ("double down", "avoid") needs at least this many DECIDED
+// outcomes — employer silence is not evidence in either direction.
+const MIN_DECIDED_FOR_RECOMMENDATION = 2;
+const MIN_POSITIVE_SCORES_FOR_THRESHOLD = 3;
+
+/** A zeroed counter row for the per-segment breakdowns. */
+export function newOutcomeCounts() {
+  const row = { total: 0 };
+  for (const bucket of OUTCOME_BUCKETS) row[bucket] = 0;
+  return row;
+}
+
+/**
+ * Rates for one breakdown row. `conversionRate` divides by SUBMITTED, never by
+ * `total` (which also counts Evaluated rows never sent). `decidedRate` divides
+ * by the rows with a recorded outcome and is `null`, not 0, while nothing is
+ * decided. `decided` ships as a count so callers gate on facts, not on a
+ * rounded percentage.
+ */
+export function withOutcomeRates(data) {
+  const submitted = data.positive + data.negative + data.awaiting;
+  const decided = data.positive + data.negative;
+  return {
+    ...data,
+    submitted,
+    decided,
+    conversionRate: submitted > 0 ? Math.round((data.positive / submitted) * 100) : 0,
+    decidedRate: decided > 0 ? Math.round((data.positive / decided) * 100) : null,
+  };
+}
+
+/** Group entries by a key, count outcomes, attach rates. Largest bucket first. */
+function breakdownBy(enriched, labelKey, keyOf) {
+  const map = new Map();
+  for (const e of enriched) {
+    const k = keyOf(e);
+    if (!map.has(k)) map.set(k, newOutcomeCounts());
+    const row = map.get(k);
+    row.total++;
+    row[e.outcome]++;
+  }
+  return [...map.entries()]
+    .map(([label, data]) => ({ [labelKey]: label, ...withOutcomeRates(data) }))
+    .sort((a, b) => b.total - a.total);
+}
+
+/**
+ * The segment worth doubling down on: highest decidedRate among rows with
+ * enough DECIDED outcomes. Ranking by conversionRate would let "1 positive +
+ * 1 awaiting" (50%) outrank "5 positive + 15 awaiting" (25%). A rate that
+ * rounds to 0% (1 of 201) is not a lane to double down on.
+ */
+export function bestDecidedSegment(rows) {
+  return rows
+    .filter(r => r.decided >= MIN_DECIDED_FOR_RECOMMENDATION && r.decidedRate > 0)
+    .sort((a, b) => b.decidedRate - a.decidedRate || b.decided - a.decided)[0] || null;
+}
+
+/**
+ * The segment to avoid: nothing advanced across enough DECIDED outcomes, the
+ * most evidence first. Gate on counts, not the rounded rate: 1 positive of 201
+ * decided rounds to 0% and is not "none advanced"; 1 negative + 1 awaiting is
+ * a data point, not a pattern.
+ */
+export function worstDecidedSegment(rows) {
+  return rows
+    .filter(r => r.positive === 0 && r.decided >= MIN_DECIDED_FOR_RECOMMENDATION)
+    .sort((a, b) => b.decided - a.decided)[0] || null;
+}
+
+/**
+ * Score floor from decided outcomes. The lowest positive score is always
+ * reported as an observation; it becomes a recommended threshold only when
+ * enough positives carry a score AND at least one rejected application scored
+ * below it — "nothing below X advanced" is vacuous when nothing below X was
+ * ever decided.
+ */
+export function scoreThresholdFrom(positiveScoresRaw, negativeScoresRaw) {
+  const positive = positiveScoresRaw.filter(s => s > 0);
+  const negative = negativeScoresRaw.filter(s => s > 0);
+  const min = positive.length > 0 ? Math.min(...positive) : 0;
+  const rejectedBelow = negative.filter(s => s < min).length;
+  const sufficient = positive.length >= MIN_POSITIVE_SCORES_FOR_THRESHOLD;
+  const prescribe = sufficient && rejectedBelow > 0;
+  let reasoning;
+  if (positive.length === 0) reasoning = 'No positive outcome carries a score yet.';
+  else if (!sufficient) reasoning = `Lowest score among positive outcomes so far is ${min}, but only ${positive.length} positive outcome(s) carry a score (${MIN_POSITIVE_SCORES_FOR_THRESHOLD} needed before this is a threshold).`;
+  else if (!prescribe) reasoning = `Lowest score among ${positive.length} positive outcomes is ${min}, but no rejected application scored below it — nothing shows that lower scores fail.`;
+  else reasoning = `None of the ${positive.length} positive outcomes scored below ${min}, and ${rejectedBelow} rejected application(s) did.`;
+  return {
+    recommended: prescribe ? Math.floor(min * 10) / 10 : null,
+    observedMinimum: min > 0 ? min : null,
+    sampleSize: positive.length,
+    sufficientSample: sufficient,
+    rejectedBelow,
+    reasoning,
+    positiveRange: positive.length > 0 ? `${min} - ${Math.max(...positive)}` : 'N/A',
+  };
+}
+
+// Statuses that count as a submitted application for channel-yield analysis.
+// 'evaluated' was never sent, 'skip' is self-filtered, and 'discarded' (withdrawn
+// or the posting closed) proves neither a submission nor an answer — the same
+// set stats.mjs uses for its canonical funnel. Module-scoped so the self-test
+// can assert membership and the channel-yield pass and self-test share one set.
+const SUBMITTED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'hired', 'rejected']);
+
+// Statuses that count as "advanced past screening" — STRICTER than
+// outcome=='positive': a bare 'applied' (submitted, no reply yet) does NOT
+// count. 'hired' is the furthest advance of all.
+const ADVANCED_STATUSES = new Set(['responded', 'interview', 'offer', 'hired']);
+
+// Print order for the CONVERSION FUNNEL summary. A status absent here is
+// silently omitted from the printed funnel, so this must track states.yml.
+const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -111,6 +301,103 @@ function parseMachineSummary(content) {
   }
 }
 
+// --- Via channel analysis (#1596 follow-up) ---
+// Pure: group submitted applications by their Via channel (agency/recruiter
+// firm) and compute per-agency advance rates, plus the agency-vs-direct
+// aggregate. Channel identity uses the SAME normalizeVia key as the
+// merge-tracker dedup guard (tracker-parse.mjs): NFKC + Unicode letters/digits,
+// so "Hays" / "HAYS " / full-width "ＨＡＹＳ" land in one bucket while distinct
+// non-Latin agencies (リクルートAgent vs パーソルAgent) stay separate. The
+// first raw spelling seen is kept for display. Rows in `submitted` whose Via
+// cell is empty (legacy tracker without the column, or a blank cell — as
+// opposed to the explicit `—` direct marker) belong to neither bucket; they
+// are counted as `unknownVia` so agencySubmitted + directSubmitted can't
+// silently undershoot the submitted total.
+function buildViaChannelAnalysis(submitted, isAdvanced, minSample = MIN_VENDOR_N) {
+  const viaOf = (e) => String(e.via ?? '').trim();
+  const isDirect = (v) => v === '—' || v === '-';
+  const agencySubmitted = submitted.filter(e => { const v = viaOf(e); return v !== '' && !isDirect(v); });
+  const directSubmitted = submitted.filter(e => isDirect(viaOf(e)));
+  const rate = (arr) => (arr.length > 0 ? Math.round((arr.filter(isAdvanced).length / arr.length) * 100) : 0);
+
+  const byAgency = new Map();
+  for (const e of agencySubmitted) {
+    const raw = viaOf(e);
+    // All-symbol names (e.g. "***") normalize to '' — fall back to the
+    // NFKC-lowercased raw string so DISTINCT all-symbol names stay distinct
+    // buckets instead of merging into one shared empty key.
+    const key = normalizeVia(raw) || raw.normalize('NFKC').toLowerCase();
+    if (!byAgency.has(key)) byAgency.set(key, { agency: raw, total: 0, advanced: 0 });
+    const entry = byAgency.get(key);
+    entry.total++;
+    if (isAdvanced(e)) entry.advanced++;
+  }
+  const breakdown = [...byAgency.values()]
+    .map(d => ({
+      agency: d.agency,
+      total: d.total,
+      advanced: d.advanced,
+      advanceRate: d.total > 0 ? Math.round((d.advanced / d.total) * 100) : 0,
+      sufficientSample: d.total >= minSample,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    minSampleForClaim: minSample,
+    agencySubmitted: agencySubmitted.length,
+    directSubmitted: directSubmitted.length,
+    // Coverage honesty: submitted rows with an empty Via cell (no `—` marker)
+    // that fall into neither bucket. Non-zero means the agency/direct split
+    // covers only a subset of submissions.
+    unknownVia: submitted.length - agencySubmitted.length - directSubmitted.length,
+    agencyAdvanceRate: rate(agencySubmitted),
+    directAdvanceRate: rate(directSubmitted),
+    breakdown,
+  };
+}
+
+// --- Tech-stack-gap extraction (shared by the analysis pass and the self-test) ---
+// Canonical display spelling keyed by lowercased alias, so "react native" /
+// "NODEJS" collapse into one bucket rather than one per case variant.
+const TECH_CANONICAL = new Map([
+  'JavaScript', 'TypeScript', 'Python', 'Ruby', 'Java', 'Go', 'Rust',
+  'React Native', 'React', 'Angular', 'Django', 'Flask', 'Rails', 'PHP',
+  'Laravel', 'Symfony', 'Kotlin', 'Swift', 'C++', 'C#', '.NET', 'MongoDB',
+  'MySQL', 'PostgreSQL', 'Redis', 'GraphQL', 'REST', 'AWS', 'GCP', 'Azure',
+  'Docker', 'Kubernetes', 'Terraform', 'Supabase', 'Inngest',
+].map(t => [t.toLowerCase(), t]));
+TECH_CANONICAL.set('node.js', 'Node.js').set('nodejs', 'Node.js');
+TECH_CANONICAL.set('vue.js', 'Vue.js').set('vuejs', 'Vue.js');
+
+// (?<!\w) / (?!\w) lookarounds, NOT \b: a trailing \b never matches after a
+// symbol edge, so "C++", "C#" and ".NET" — three of the most common stacks —
+// were silently never extracted, vanishing from the tech-gap rollup and the
+// "filter out roles requiring X" recommendation. Same symbol-edge fix that
+// skill-extract.mjs and upskill.mjs already carry. Ordered longest-first
+// (React Native before React) so the specific alternative wins at a position.
+const TECH_MENTION_RE = /(?<!\w)(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React Native|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest)(?!\w)/gi;
+
+/**
+ * Canonical tech names mentioned in a gap description.
+ * @param {string} description
+ * @returns {string[]} Canonical tech names, one entry per mention (may repeat).
+ */
+function extractTechMentions(description) {
+  const matches = String(description ?? '').match(TECH_MENTION_RE);
+  if (!matches) return [];
+  return matches.map(m => TECH_CANONICAL.get(m.toLowerCase()) || m);
+}
+
+/**
+ * Run the in-process self-test for this script's pure helpers.
+ *
+ * Covers the Machine Summary parser (including the MACHINE_SUMMARY_FIELDS
+ * allowlist and the nested `risk_summary` / `requirement_importance` shapes),
+ * ATS vendor detection, and the Via channel analysis. Exits non-zero on the
+ * first batch of failures so CI and `--self-test` fail loudly.
+ *
+ * @returns {void}
+ */
 function runSelfTest() {
   const summary = parseMachineSummary(`
 ## Machine Summary
@@ -130,6 +417,9 @@ top_strengths:
 risk_level: "Medium"
 confidence: "High"
 next_action: "Follow up on ticket #42 with tailored CV"
+work_auth: "unstated"
+via: "Hays"
+company_confidential: true
 \`\`\`
 `);
 
@@ -139,13 +429,333 @@ next_action: "Follow up on ticket #42 with tailored CV"
   if (!Array.isArray(summary?.hard_stops) || summary.hard_stops.length !== 0) failures.push('empty list was not parsed');
   if (summary?.soft_gaps?.[0] !== 'No direct healthcare domain experience') failures.push('list item was not parsed');
   if (summary?.next_action !== 'Follow up on ticket #42 with tailored CV') failures.push('hash-containing scalar field was not parsed');
+  if (summary?.via !== 'Hays') failures.push('via was not preserved from Machine Summary');
+  if (summary?.company_confidential !== true) failures.push('company_confidential boolean was not preserved from Machine Summary');
+  if (summary?.work_auth !== 'unstated') failures.push('work_auth field was not preserved from Machine Summary');
+
+  // Backward compat (#1737): summaries without risk_summary parse as before, key simply absent.
+  if ('risk_summary' in (summary ?? {})) failures.push('summary without risk_summary must not gain the key');
+
+  // risk_summary preservation (#1737): the nested map must survive the
+  // MACHINE_SUMMARY_FIELDS allowlist intact — nested keys preserved, not
+  // flattened or dropped.
+  const riskSummary = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+legitimacy_tier: "High Confidence"
+risk_summary:
+  legitimacy: high_confidence
+  classification: clear
+  culture: caution
+  interview_redflags: not_evaluated
+  ai_infra: not_evaluated
+\`\`\`
+`)?.risk_summary;
+  if (!riskSummary || typeof riskSummary !== 'object' || Array.isArray(riskSummary)) {
+    failures.push('risk_summary nested map was dropped or not parsed as a map');
+  } else {
+    if (riskSummary.legitimacy !== 'high_confidence') failures.push('risk_summary.legitimacy was not preserved');
+    if (riskSummary.classification !== 'clear') failures.push('risk_summary.classification was not preserved');
+    if (riskSummary.culture !== 'caution') failures.push('risk_summary.culture was not preserved');
+    if (riskSummary.interview_redflags !== 'not_evaluated') failures.push('risk_summary.interview_redflags was not preserved');
+    if (riskSummary.ai_infra !== 'not_evaluated') failures.push('risk_summary.ai_infra was not preserved');
+  }
+
+  // requirement_importance preservation: Block B's table is a LIST OF MAPS,
+  // a shape no allowlisted key had before it. The allowlist filters top-level
+  // keys only, so the list must survive with every row's nested fields intact
+  // — including jd_signal: null, which is legal for the structural/inferred
+  // evidence tiers and must not be dropped or coerced.
+  const reqImportance = parseMachineSummary(`
+## Machine Summary
+
+\`\`\`yaml
+company: "Acme"
+role: "Staff AI Engineer"
+score: 4.4
+requirement_importance:
+  - requirement: "Fluent German (C1)"
+    jd_signal: "Verhandlungssicheres Deutsch ist Voraussetzung"
+    evidence: "stated"
+    importance: "critical"
+    match: "missing"
+  - requirement: "Kubernetes in production"
+    jd_signal: null
+    evidence: "inferred"
+    importance: "meaningful"
+    match: "partial"
+\`\`\`
+`)?.requirement_importance;
+  if (!Array.isArray(reqImportance) || reqImportance.length !== 2) {
+    failures.push('requirement_importance list was dropped or not parsed as a list');
+  } else {
+    const [stated, inferred] = reqImportance;
+    if (stated.requirement !== 'Fluent German (C1)') failures.push('requirement_importance[0].requirement was not preserved');
+    if (stated.jd_signal !== 'Verhandlungssicheres Deutsch ist Voraussetzung') failures.push('requirement_importance[0].jd_signal verbatim quote was not preserved');
+    if (stated.evidence !== 'stated') failures.push('requirement_importance[0].evidence was not preserved');
+    if (stated.importance !== 'critical') failures.push('requirement_importance[0].importance was not preserved');
+    if (stated.match !== 'missing') failures.push('requirement_importance[0].match was not preserved');
+    if (inferred.jd_signal !== null) failures.push('requirement_importance[1].jd_signal null was not preserved');
+    if (inferred.evidence !== 'inferred') failures.push('requirement_importance[1].evidence was not preserved');
+    // The Block B gate, asserted on parsed data: an inferred row may never
+    // reach the two bands that create the interview-risk + mitigation
+    // obligation. Enforced in the modes; checked here so a fixture that
+    // violates it can never be introduced as "expected" output.
+    if (inferred.importance === 'critical' || inferred.importance === 'high') {
+      failures.push('requirement_importance fixture violates the inferred cap (evidence: inferred must never be critical/high)');
+    }
+  }
+
+  // Backward compat: summaries without requirement_importance parse as before.
+  if ('requirement_importance' in (summary ?? {})) failures.push('summary without requirement_importance must not gain the key');
+
+  // Vendor detection (community ATS only; white-labeled → null)
+  const vendorCases = [
+    ['https://boards.greenhouse.io/acme/jobs/12345', 'greenhouse'],
+    ['https://job-boards.eu.greenhouse.io/acme/jobs/9', 'greenhouse'],
+    ['https://jobs.lever.co/acme/abc-def', 'lever'],
+    ['https://jobs.ashbyhq.com/acme/uuid', 'ashby'],
+    ['https://acme.wd1.myworkdayjobs.com/en-US/careers/job/R-1', 'workday'],
+    ['https://careers.icims.com/jobs/9/x', 'icims'],
+    ['https://jobs.dayforcehcm.com/en-US/co/CANDIDATEPORTAL/jobs/1', null],
+    ['not a url', null],
+    ['', null],
+    [null, null],
+  ];
+  for (const [url, expected] of vendorCases) {
+    const got = detectVendor(url);
+    if (got !== expected) failures.push(`detectVendor(${JSON.stringify(url)}) → ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+  }
+
+  // Via channel analysis (#1596): agency vs direct yield, normalized buckets.
+  const viaRows = [
+    { via: 'Hays', normalizedStatus: 'interview' },
+    { via: 'HAYS ', normalizedStatus: 'rejected' },   // same bucket as Hays
+    { via: 'ＨＡＹＳ', normalizedStatus: 'rejected' }, // full-width → same bucket as Hays (NFKC)
+    { via: 'Randstad', normalizedStatus: 'rejected' },
+    { via: 'リクルートAgent', normalizedStatus: 'interview' }, // non-Latin: distinct agency...
+    { via: 'パーソルAgent', normalizedStatus: 'rejected' },    // ...must NOT merge with the one above
+    { via: '—', normalizedStatus: 'responded' },       // direct
+    { via: '—', normalizedStatus: 'rejected' },        // direct
+    { via: '', normalizedStatus: 'applied' },          // no Via column → unknownVia, neither bucket
+  ];
+  const viaResult = buildViaChannelAnalysis(viaRows, (e) => ADVANCED_STATUSES.has(e.normalizedStatus), 2);
+  if (viaResult.agencySubmitted !== 6) failures.push(`via: agencySubmitted → ${viaResult.agencySubmitted}, expected 6`);
+  if (viaResult.directSubmitted !== 2) failures.push(`via: directSubmitted → ${viaResult.directSubmitted}, expected 2`);
+  if (viaResult.unknownVia !== 1) failures.push(`via: unknownVia → ${viaResult.unknownVia}, expected 1 (submitted row with empty Via must be counted, not silently dropped)`);
+  if (viaResult.directAdvanceRate !== 50) failures.push(`via: directAdvanceRate → ${viaResult.directAdvanceRate}, expected 50`);
+  const hays = viaResult.breakdown.find(a => a.agency === 'Hays');
+  if (!hays || hays.total !== 3 || hays.advanceRate !== 33) {
+    failures.push(`via: Hays bucket wrong (case/space/full-width variants must merge) → ${JSON.stringify(hays)}`);
+  }
+  if (!hays?.sufficientSample) failures.push('via: Hays should meet the n=2 sample bar');
+  const recruit = viaResult.breakdown.find(a => a.agency === 'リクルートAgent');
+  const persol = viaResult.breakdown.find(a => a.agency === 'パーソルAgent');
+  if (!recruit || !persol || recruit.total !== 1 || persol.total !== 1) {
+    failures.push(`via: distinct non-Latin agencies must stay separate buckets → リクルートAgent=${JSON.stringify(recruit)}, パーソルAgent=${JSON.stringify(persol)}`);
+  }
+  const randstad = viaResult.breakdown.find(a => a.agency === 'Randstad');
+  if (randstad?.sufficientSample) failures.push('via: Randstad (n=1) must be flagged as too small for a claim');
+  if (buildViaChannelAnalysis([], () => false).breakdown.length !== 0) {
+    failures.push('via: empty input must produce an empty breakdown');
+  }
+
+  // Hired status (canonical per states.yml; follow-up to PR #2050). A landed job
+  // is the strongest positive outcome and the furthest advance — it must not be
+  // mis-bucketed as 'pending' or dropped from channel yield / the funnel.
+  if (classifyOutcome('Hired') !== 'positive') failures.push(`hired: classifyOutcome('Hired') → ${classifyOutcome('Hired')}, expected 'positive'`);
+  // Every hired alias must resolve to 'hired' — testing only one lets the others regress silently.
+  for (const alias of ['contratado', 'contratada', 'accepted', 'accept']) {
+    if (normalizeStatus(alias) !== 'hired') failures.push(`hired: normalizeStatus('${alias}') → ${normalizeStatus(alias)}, expected 'hired'`);
+  }
+  // Every submitted status must land in exactly one outcome bucket, and every
+  // bucket must be a declared one — a status added to one list and not the other
+  // would silently vanish from the rates.
+  for (const st of SUBMITTED_STATUSES) {
+    const bucket = classifyOutcome(st);
+    if (!['positive', 'negative', 'awaiting'].includes(bucket)) failures.push(`buckets: '${st}' classifies as '${bucket}', so submitted counts would disagree with the channel-yield pass`);
+  }
+  if (classifyOutcome('Discarded') !== 'discarded' || SUBMITTED_STATUSES.has('discarded')) failures.push('discarded: withdrawn/closed rows must be their own bucket and not count as submitted');
+
+  if (!ADVANCED_STATUSES.has('hired')) failures.push('hired: ADVANCED_STATUSES must include hired (a hire advanced past screening)');
+  if (!SUBMITTED_STATUSES.has('hired')) failures.push('hired: SUBMITTED_STATUSES must include hired (a hire was submitted)');
+  if (!FUNNEL_ORDER.includes('hired')) failures.push('hired: FUNNEL_ORDER must include hired so it prints in the funnel');
+  const hiredVia = buildViaChannelAnalysis(
+    [{ via: 'Hays', normalizedStatus: 'hired' }, { via: 'Hays', normalizedStatus: 'rejected' }],
+    (e) => ADVANCED_STATUSES.has(e.normalizedStatus), 1);
+  const hiredHays = hiredVia.breakdown.find(a => a.agency === 'Hays');
+  if (!hiredHays || hiredHays.advanced !== 1 || hiredHays.advanceRate !== 50) {
+    failures.push(`hired: must count as advanced in channel yield (1/2 = 50%) → ${JSON.stringify(hiredHays)}`);
+  }
+
+  // Tech-gap extraction (regression): symbol-edge stacks were silently dropped
+  // because a trailing \b never matches after "+"/"#" (C++, C#, .NET).
+  const techHits = extractTechMentions('Requires C++, C# and .NET, plus React Native and Go');
+  for (const expected of ['C++', 'C#', '.NET', 'React Native', 'Go']) {
+    if (!techHits.includes(expected)) failures.push(`tech extraction dropped "${expected}"`);
+  }
+  // No false positives from substrings ("Go" in "Google", "Java" in "JavaScripting").
+  if (extractTechMentions('Google Cloud and JavaScripting skills').length !== 0) {
+    failures.push('tech extraction false-positived on Google/JavaScripting');
+  }
+  // Case/punctuation variants collapse to one canonical bucket.
+  if (extractTechMentions('nodejs, Node.js, NODEJS').some(t => t !== 'Node.js')) {
+    failures.push('node.js case variants failed to canonicalize');
+  }
+
+  // Production aggregation regressions. The fixture distinguishes the fixed
+  // denominator from the old full-tracker base: 3 tags among 20 eligible rows
+  // trigger a recommendation, while 3 among all 30 rows would not.
+  const baseFixture = [];
+  for (let i = 0; i < 20; i++) {
+    baseFixture.push({
+      outcome: i === 19 ? 'negative' : 'self_filtered',
+      notes: i < 3 ? `SKIP: geo-block${i === 0 ? '; SKIP: geo-block' : ''}` : '',
+      report: { gaps: [] },
+    });
+  }
+  for (let i = 0; i < 10; i++) {
+    baseFixture.push({ outcome: 'pending', notes: '', report: null });
+  }
+  const baseSignals = buildPatternSignals(baseFixture);
+  if (baseSignals.discardReasonBase !== 20) {
+    failures.push(`discardReasonBase counted ${baseSignals.discardReasonBase}, expected 20`);
+  }
+  if (baseSignals.blockerBase !== 0) {
+    failures.push(`blockerBase counted ${baseSignals.blockerBase}, expected 0 (no gaps in fixture)`);
+  }
+  const geoReason = baseSignals.discardReasonStats.find(d => d.reason === 'geo-block');
+  if (geoReason?.frequency !== 3 || geoReason?.percentage !== 15) {
+    failures.push(`discard aggregation returned ${JSON.stringify(geoReason)}, expected frequency 3 and percentage 15`);
+  }
+  if (!baseSignals.discardReasonRecommendation) {
+    failures.push('3 discard reasons among 20 eligible entries did not trigger a recommendation');
+  }
+
+  // One report whose gaps all resolve to geo-restriction is one affected entry,
+  // not three. The explicit count catches both missing and misclassified fixture
+  // descriptions instead of merely checking that no count exceeds the base.
+  const dupBlockerFixture = [
+    { outcome: 'negative', notes: '', report: { gaps: [
+      { description: 'US-only remote', severity: 'hard' },
+      { description: 'Remote US only, no sponsorship', severity: 'hard' },
+      { description: 'US-only residency required', severity: 'hard' },
+    ] } },
+    { outcome: 'negative', notes: '', report: { gaps: [{ description: 'US-only remote', severity: 'hard' }] } },
+    // Gapless rows make the fixture distinguish blockerBase (2) from the old
+    // full-tracker denominator (5). Restoring `/ enriched.length` must turn the
+    // expected 100% into 40% and fail this regression.
+    { outcome: 'pending', notes: '', report: { gaps: [] } },
+    { outcome: 'pending', notes: '', report: null },
+    { outcome: 'positive', notes: '', report: { gaps: [] } },
+  ];
+  const blockerSignals = buildPatternSignals(dupBlockerFixture);
+  const geoBlocker = blockerSignals.blockerAnalysis.find(b => b.blocker === 'geo-restriction');
+  if (geoBlocker?.frequency !== blockerSignals.blockerBase || geoBlocker?.percentage !== 100) {
+    failures.push(`geo blocker aggregation returned ${JSON.stringify(geoBlocker)} against base ${blockerSignals.blockerBase}, expected 2/2 (100%)`);
+  }
+
+  // Repeated technology mentions across one report count once per entry, and a
+  // withdrawn/closed ('discarded') row is harvested like a rejected one.
+  const techSignals = buildPatternSignals([
+    { outcome: 'negative', notes: '', report: { gaps: [
+      { description: 'Java is required', severity: 'hard' },
+      { description: 'Production Java and Go experience', severity: 'hard' },
+    ] } },
+    { outcome: 'discarded', notes: '', report: { gaps: [{ description: 'Java is required', severity: 'hard' }] } },
+  ]);
+  const javaGap = techSignals.techStackGaps.find(g => g.skill === 'Java');
+  if (javaGap?.frequency !== 2) {
+    failures.push(`technology harvest returned ${JSON.stringify(javaGap)}, expected Java frequency 2 (one negative + one discarded row)`);
+  }
+
+  // Empty populations must expose zero bases and no NaN-bearing stats.
+  const emptySignals = buildPatternSignals([]);
+  if (emptySignals.discardReasonBase !== 0 || emptySignals.blockerBase !== 0
+      || emptySignals.discardReasonStats.length !== 0 || emptySignals.blockerAnalysis.length !== 0
+      || emptySignals.discardReasonRecommendation) {
+    failures.push(`empty pattern signals were not empty: ${JSON.stringify(emptySignals)}`);
+  }
+
+  // Remote classifier (regression): the "70+" signal ends in "+", so a
+  // trailing \b silently dropped it and "70+ countries" postings fell to the
+  // weaker 'regional remote' bucket instead of 'global remote'.
+  if (classifyRemote('Fully remote — hiring in 70+ countries') !== 'global remote') {
+    failures.push('classifyRemote did not read "70+ countries" as global remote');
+  }
+  if (classifyRemote('US-only remote') !== 'geo-restricted') {
+    failures.push('classifyRemote geo-restricted precedence regressed');
+  }
+
+  // Reports-root containment: a legit link stays inside reports/, a crafted
+  // traversal link escapes root and must be rejected before parseReport. join()
+  // collapses '..' at the call site, so the candidate is already absolute here.
+  {
+    const legit = join(CAREER_OPS, 'reports', '042-acme-2026-01-01.md');
+    if (!withinReports(legit)) failures.push('containment: legit reports/ path wrongly rejected');
+    const escape = join(CAREER_OPS, 'reports/../../../etc/passwd');
+    if (withinReports(escape)) failures.push('containment: traversal path escaped reports/ (path-traversal guard broken)');
+    const sibling = join(CAREER_OPS, 'reports-evil', 'x.md');
+    if (withinReports(sibling)) failures.push('containment: reports-prefixed sibling dir wrongly accepted');
+  }
+
+  // Symlink-escape + missing-file graceful degradation (#2655). realpath
+  // canonicalization must reject a symlink whose target resolves OUTSIDE
+  // reports/ (a lexical-only guard would follow it), while a real file inside
+  // reports/ still passes and a missing candidate degrades gracefully (the
+  // downstream read returns null) rather than throwing.
+  {
+    const reportsDir = join(CAREER_OPS, 'reports');
+    if (existsSync(reportsDir)) {
+      const tag = `__co2655-${process.pid}-${Date.now()}`;
+      const realReport = join(reportsDir, `${tag}-real.md`);
+      const escapeLink = join(reportsDir, `${tag}-escape.md`);
+      const missing = join(reportsDir, `${tag}-missing.md`);
+      // Missing candidate must not throw and must stay accepted so the
+      // downstream read returns null (pre-#2385 existsSync-removal semantics).
+      try {
+        if (!withinReports(missing)) failures.push('containment: missing report file wrongly rejected (should degrade to a null read, not a hard skip)');
+      } catch (err) {
+        failures.push(`containment: missing report file threw instead of degrading gracefully (${err.code || err.message})`);
+      }
+      try {
+        writeFileSync(realReport, '# real report\n');
+        if (!withinReports(realReport)) failures.push('containment: real file inside reports/ wrongly rejected');
+        // Symlink whose target resolves outside reports/ (this module file);
+        // its lexical path is under reports/ but realpath escapes and must be
+        // rejected. symlinkSync often needs privilege on Windows — skip the
+        // assertion (do not fail) when the platform refuses.
+        let symlinkCreated = false;
+        try {
+          symlinkSync(fileURLToPath(import.meta.url), escapeLink);
+          symlinkCreated = true;
+        } catch (err) {
+          if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'ENOSYS') {
+            console.log(`analyze-patterns self-test: skipping symlink-escape assertion (platform refused symlink creation: ${err.code})`);
+          } else {
+            throw err;
+          }
+        }
+        if (symlinkCreated && withinReports(escapeLink)) {
+          failures.push('containment: symlink escaping reports/ was accepted (realpath containment broken)');
+        }
+      } finally {
+        rmSync(realReport, { force: true });
+        rmSync(escapeLink, { force: true });
+      }
+    }
+  }
 
   if (failures.length > 0) {
-    console.error(`Machine Summary parser self-test failed: ${failures.join('; ')}`);
+    console.error(`analyze-patterns self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
 
-  console.log('Machine Summary parser self-test OK');
+  console.log('analyze-patterns self-test OK (Machine Summary parser + vendor detection + via channel analysis)');
   process.exit(0);
 }
 
@@ -153,29 +763,69 @@ next_action: "Follow up on ticket #42 with tailored CV"
 function parseTracker() {
   if (!existsSync(APPS_FILE)) return [];
   const content = readFileSync(APPS_FILE, 'utf-8');
+  const lines = content.split('\n');
+  const colmap = resolveColumns(lines);
   const entries = [];
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 9) continue;
-    const num = parseInt(parts[1]);
-    if (isNaN(num)) continue;
-    entries.push({
-      num, date: parts[2], company: parts[3], role: parts[4],
-      score: parts[5], status: parts[6], pdf: parts[7], report: parts[8],
-      notes: parts[9] || '',
-    });
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row) entries.push(row);
   }
   return entries;
 }
 
+// Canonical reports-root containment. A tracker link resolves to a candidate
+// path; accept it only if it stays inside the repo's reports/ directory. Two
+// layers: a cheap lexical traversal guard (no stat) rejects a crafted link like
+// reports/../../etc/passwd, which join() collapses to a repo-relative path that
+// no longer starts with reports/; then realpath canonicalization rejects a
+// symlink whose target escapes reports/ (a lexical-only check would follow it).
+// realpathSync throws ENOENT/ENOTDIR for a not-yet-created candidate or a
+// missing reports root — both are non-fatal: a missing candidate falls through
+// to the downstream read (which returns null, preserving prior semantics), a
+// missing root means there are simply no reports. Only genuinely unexpected
+// errors rethrow, matching readTextIfExists. Identical to the guard in
+// upskill.mjs so both sites behave the same.
+function withinReports(candidate) {
+  const repoRelative = relative(CAREER_OPS, candidate).split(sep).join('/');
+  if (!repoRelative.startsWith('reports/') || repoRelative.includes('..')) return false;
+  let realRoot;
+  try {
+    realRoot = realpathSync(join(CAREER_OPS, 'reports'));
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+  let realCandidate;
+  try {
+    realCandidate = realpathSync(candidate);
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return true;
+    throw err;
+  }
+  const rootWithSep = realRoot.endsWith(sep) ? realRoot : realRoot + sep;
+  return realCandidate === realRoot || realCandidate.startsWith(rootWithSep);
+}
+
+// Read a file, returning null when it does not exist. A pre-flight existsSync
+// costs a full stat per report and races with the read (#2385); attempting the
+// read and handling the missing-file error costs the same as a bare read.
+function readTextIfExists(path) {
+  try {
+    return readFileSync(path, 'utf-8');
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return null;
+    throw err;
+  }
+}
+
 // --- Parse a single report file ---
 function parseReport(reportPath) {
-  if (!existsSync(reportPath)) return null;
-  const content = readFileSync(reportPath, 'utf-8');
+  const content = readTextIfExists(reportPath);
+  if (content === null) return null;
   const report = {
     company: null,
     role: null,
+    url: null,
     archetype: null,
     legitimacyTier: null,
     finalDecision: null,
@@ -188,6 +838,7 @@ function parseReport(reportPath) {
     confidence: null,
     nextAction: null,
     topStrengths: [],
+    discardReasons: [],
     scores: {},
     gaps: [],
   };
@@ -208,6 +859,7 @@ function parseReport(reportPath) {
     report.confidence = normalizeScalar(machineSummary.confidence) || report.confidence;
     report.nextAction = normalizeScalar(machineSummary.next_action) || report.nextAction;
     report.topStrengths = normalizeList(machineSummary.top_strengths);
+    report.discardReasons = normalizeList(machineSummary.discard_reasons);
 
     if (typeof machineSummary.score === 'number') {
       report.scores.global = machineSummary.score;
@@ -235,6 +887,12 @@ function parseReport(reportPath) {
 
   // Fallback: report header field `Archetype: ...` or `Arquetipo: ...` (newer reports use this).
   const headerArchRegex = /^(?:Archetype|Arquetipo):\s*(.+?)$/im;
+
+  // Report header carries `**URL:**` between Score and PDF (see CLAUDE.md /
+  // Pipeline Integrity). Capture the first http(s) URL on that line for vendor
+  // detection; reports predating the field simply leave url null (→ unknown bucket).
+  const urlMatch = plain.match(/^URL:\s*(https?:\/\/\S+)/im);
+  if (urlMatch && !report.url) report.url = urlMatch[1].trim().replace(/[)>\].,]+$/, '');
 
   const archMatch = plain.match(blockARegex) || plain.match(headerArchRegex);
   if (archMatch && !report.archetype) report.archetype = archMatch[1].trim();
@@ -311,9 +969,40 @@ function classifyRemote(raw) {
   if (/\b(us[- ]?only|canada[- ]?only|residents only|usa only|us residents|canada residents)\b/.test(lower)) return 'geo-restricted';
   if (/\bargentina\s+remote\s+only\b/.test(lower)) return 'geo-restricted';
   if (/\b(hybrid|on-?site|office|columbus|cape town|relocat)\b/.test(lower)) return 'hybrid/onsite';
-  if (/\b(global|anywhere|worldwide|no restrict|70\+|work from anywhere)\b/.test(lower)) return 'global remote';
+  // (?<!\w)/(?!\w) not \b: the "70+" signal ends in "+", and a trailing \b
+  // never matches after a symbol edge, so "remote in 70+ countries" fell
+  // through to the weaker 'regional remote' bucket. Word alternatives behave
+  // identically under either boundary, so this only rescues the "70+" case.
+  if (/(?<!\w)(global|anywhere|worldwide|no restrict|70\+|work from anywhere)(?!\w)/.test(lower)) return 'global remote';
   if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
   return 'unknown';
+}
+
+// --- Detect ATS vendor from a posting URL ---
+// Host-only match, deliberately looser than liveness-api.mjs's resolveAtsApi()
+// (which needs the full posting path to build an API URL) — a tracker report's
+// URL may point at a board/careers page, not a canonical posting.
+//
+// SCOPE (intentional): only ATS with clean, public URL fingerprints — Greenhouse,
+// Lever, Ashby, Workday, iCIMS. White-labeled ATS (UKG, Dayforce, and similar) are
+// NOT detectable from the URL alone and are deferred until the community adds a
+// reliable signal (e.g. confirmation-email domain). Undetected → 'unknown'.
+const VENDOR_HOST_PATTERNS = [
+  { id: 'greenhouse', test: (h) => /(^|\.)greenhouse\.io$/.test(h) },
+  { id: 'lever',      test: (h) => h === 'jobs.lever.co' || h.endsWith('.lever.co') },
+  { id: 'ashby',      test: (h) => h === 'jobs.ashbyhq.com' || h.endsWith('.ashbyhq.com') },
+  { id: 'workday',    test: (h) => h.endsWith('.myworkdayjobs.com') || h.endsWith('.myworkdaysite.com') },
+  { id: 'icims',      test: (h) => h.endsWith('.icims.com') },
+];
+
+function detectVendor(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  let u;
+  try { u = new URL(rawUrl.trim()); } catch { return null; }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  const host = u.hostname.toLowerCase();
+  for (const v of VENDOR_HOST_PATTERNS) if (v.test(host)) return v.id;
+  return null;
 }
 
 // --- Classify company size ---
@@ -345,6 +1034,94 @@ function extractBlockerType(gap) {
   return 'other';
 }
 
+/**
+ * Build the blocker, discard-reason, and technology signals used by both the
+ * production analysis and regression fixtures.
+ * @param {Array<object>} enriched Tracker entries enriched with outcomes/reports.
+ * @returns {object} Aggregated rates, population bases, and discard recommendation.
+ */
+function buildPatternSignals(enriched) {
+  const blockerCounts = new Map();
+  const blockerBase = gapBearingBase(enriched);
+  for (const e of enriched) {
+    if (!e.report?.gaps) continue;
+    const entryBlockers = new Set();
+    for (const gap of e.report.gaps) {
+      const type = extractBlockerType(gap);
+      if (type) entryBlockers.add(type);
+    }
+    for (const type of entryBlockers) {
+      blockerCounts.set(type, (blockerCounts.get(type) || 0) + 1);
+    }
+  }
+  const blockerAnalysis = [...blockerCounts.entries()]
+    .map(([blocker, frequency]) => ({
+      blocker,
+      frequency,
+      percentage: blockerBase ? Math.round((frequency / blockerBase) * 100) : 0,
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  const discardReasonCounts = new Map();
+  for (const e of enriched) {
+    if (!REASON_BEARING.has(e.outcome)) continue;
+    const notesMatch = (e.notes || '').match(/(?:DISCARD|SKIP):\s*([^,;\n]+)/gi);
+    if (!notesMatch) continue;
+    const entryReasons = new Set();
+    for (const match of notesMatch) {
+      const key = match.replace(/^(?:DISCARD|SKIP):\s*/i, '').trim().toLowerCase();
+      if (key) entryReasons.add(key);
+    }
+    for (const key of entryReasons) {
+      discardReasonCounts.set(key, (discardReasonCounts.get(key) || 0) + 1);
+    }
+  }
+  const discardReasonBase = discardableBase(enriched);
+  const discardReasonStats = [...discardReasonCounts.entries()]
+    .map(([reason, frequency]) => ({
+      reason,
+      frequency,
+      percentage: discardReasonBase ? Math.round((frequency / discardReasonBase) * 100) : 0,
+    }))
+    .sort((a, b) => b.frequency - a.frequency);
+
+  const stackGapCounts = new Map();
+  for (const e of enriched) {
+    if (!REASON_BEARING.has(e.outcome)) continue;
+    if (!e.report?.gaps) continue;
+    const entryTechs = new Set();
+    for (const gap of e.report.gaps) {
+      for (const tech of extractTechMentions(gap.description)) entryTechs.add(tech);
+    }
+    for (const tech of entryTechs) {
+      stackGapCounts.set(tech, (stackGapCounts.get(tech) || 0) + 1);
+    }
+  }
+  const techStackGaps = [...stackGapCounts.entries()]
+    .map(([skill, frequency]) => ({ skill, frequency }))
+    .sort((a, b) => b.frequency - a.frequency)
+    .slice(0, 15);
+
+  const topDiscardReason = discardReasonStats[0];
+  const discardReasonRecommendation = topDiscardReason
+    && topDiscardReason.frequency >= Math.max(3, Math.ceil(discardReasonBase * 0.15))
+    ? {
+      action: `Add "${topDiscardReason.reason}" filter to modes/_custom.md to avoid wasting evaluation effort`,
+      reasoning: `"${topDiscardReason.reason}" is the most frequent discard reason (${topDiscardReason.frequency}x, ${topDiscardReason.percentage}% of ${discardReasonBase} eligible entries with self-filtered or negative outcomes).`,
+      impact: 'high',
+    }
+    : null;
+
+  return {
+    blockerBase,
+    blockerAnalysis,
+    discardReasonBase,
+    discardReasonStats,
+    techStackGaps,
+    discardReasonRecommendation,
+  };
+}
+
 // --- Main analysis ---
 function analyze() {
   const entries = parseTracker();
@@ -356,8 +1133,23 @@ function analyze() {
   // Enrich entries with report data and classification
   const enriched = entries.map(e => {
     const reportMatch = e.report.match(/\]\(([^)]+)\)/);
-    const reportPath = reportMatch ? join(CAREER_OPS, reportMatch[1]) : null;
-    const reportData = reportPath ? parseReport(reportPath) : null;
+    // Tracker links are relative to the tracker file's own directory (see
+    // merge-tracker.mjs link normalization); fall back to repo root for
+    // legacy root-relative links. Each candidate is guarded to reports/
+    // before the read is attempted; parseReport returns null for a missing
+    // file, so no pre-flight existsSync is needed (#2385).
+    let reportData = null;
+    if (reportMatch) {
+      const candidates = new Set([
+        join(dirname(APPS_FILE), reportMatch[1]),
+        join(CAREER_OPS, reportMatch[1]),
+      ]);
+      for (const candidate of candidates) {
+        if (!withinReports(candidate)) continue;
+        reportData = parseReport(candidate);
+        if (reportData) break;
+      }
+    }
     const outcome = classifyOutcome(e.status);
     const trackerScore = parseFloat(e.score);
     const score = Number.isFinite(trackerScore)
@@ -376,15 +1168,17 @@ function analyze() {
       report: reportData,
       remoteBucket: classifyRemote(remoteSource),
       companySize: classifyCompanySize(teamSource),
+      vendor: detectVendor(reportData?.url),
     };
   });
 
-  // Count entries beyond "Evaluated"
-  const beyondEvaluated = enriched.filter(e => e.normalizedStatus !== 'evaluated');
-  if (beyondEvaluated.length < MIN_THRESHOLD) {
+  // The floor counts applications actually SENT: a tracker of skipped and
+  // withdrawn rows has no outcomes to learn from.
+  const sent = enriched.filter(e => SUBMITTED_STATUSES.has(e.normalizedStatus));
+  if (sent.length < MIN_THRESHOLD) {
     return {
-      error: `Not enough data: ${beyondEvaluated.length}/${MIN_THRESHOLD} applications beyond "Evaluated". Keep applying and come back later.`,
-      current: beyondEvaluated.length,
+      error: `Not enough data: ${sent.length}/${MIN_THRESHOLD} applications sent. Keep applying and come back later.`,
+      current: sent.length,
       threshold: MIN_THRESHOLD,
     };
   }
@@ -397,7 +1191,7 @@ function analyze() {
   }
 
   // --- Score comparison by outcome ---
-  const scoresByOutcome = { positive: [], negative: [], self_filtered: [], pending: [] };
+  const scoresByOutcome = Object.fromEntries(OUTCOME_BUCKETS.map((b) => [b, []]));
   for (const e of enriched) {
     if (e.score > 0) scoresByOutcome[e.outcome].push(e.score);
   }
@@ -413,120 +1207,107 @@ function analyze() {
     };
   };
 
-  const scoreComparison = {
-    positive: scoreStats(scoresByOutcome.positive),
-    negative: scoreStats(scoresByOutcome.negative),
-    self_filtered: scoreStats(scoresByOutcome.self_filtered),
-    pending: scoreStats(scoresByOutcome.pending),
+  const scoreComparison = Object.fromEntries(
+    OUTCOME_BUCKETS.map((bucket) => [bucket, scoreStats(scoresByOutcome[bucket])])
+  );
+
+  const archetypeBreakdown = breakdownBy(enriched, 'archetype', e => e.report?.archetype || 'Unknown');
+
+  // --- Blocker / discard-reason / technology analysis ---
+  // Shared with --self-test so fixtures exercise the production aggregation.
+  const {
+    blockerBase,
+    blockerAnalysis,
+    discardReasonBase,
+    discardReasonStats,
+    techStackGaps,
+    discardReasonRecommendation,
+  } = buildPatternSignals(enriched);
+
+  const remotePolicy = breakdownBy(enriched, 'policy', e => e.remoteBucket);
+
+  const companySizeBreakdown = breakdownBy(enriched, 'size', e => e.companySize);
+
+  // --- ATS vendor / channel analysis (algorithmic-monoculture aware) ---
+  // Motivation: Bommasani et al., "Algorithmic Monocultures in Hiring" (FAccT
+  // 2026, arXiv:2605.27371) — rejections routed through a shared screening
+  // vendor are correlated, not independent. If a concentrated channel yields
+  // nothing, feeding it the same profile has diminishing returns; the rational
+  // move is to divert those companies to referral/direct contact.
+  //
+  // HONESTY: this reports CHANNEL YIELD, not discrimination. A single tracker
+  // can't causally separate "the vendor's algorithm filters me" from "that
+  // vendor skews toward a segment I fit poorly" — but "stop feeding a dead
+  // channel, go around it" is rational under either explanation.
+  //
+  // "Advanced" here is STRICTER than the outcome=='positive' bucket: a bare
+  // 'applied' (submitted, no reply yet) does NOT count as passing screening.
+  const isAdvanced = (e) => ADVANCED_STATUSES.has(e.normalizedStatus);
+
+  // Only applications we actually submitted count toward channel yield (drop
+  // 'evaluated' = never applied, and 'skip' = self-filtered).
+  const submitted = enriched.filter(e => SUBMITTED_STATUSES.has(e.normalizedStatus));
+  const overallAdvanced = submitted.filter(isAdvanced).length;
+  const overallAdvanceRate = submitted.length > 0
+    ? Math.round((overallAdvanced / submitted.length) * 100) : 0;
+
+  const vendorMap = new Map();
+  for (const e of submitted) {
+    const v = e.vendor || 'unknown';
+    if (!vendorMap.has(v)) vendorMap.set(v, { total: 0, advanced: 0 });
+    const entry = vendorMap.get(v);
+    entry.total++;
+    if (isAdvanced(e)) entry.advanced++;
+  }
+
+  // Recommendations only fire on buckets with enough n to not be noise; the
+  // breakdown still SHOWS every bucket (with its n) so nothing is hidden.
+  const vendorBreakdown = [...vendorMap.entries()]
+    .filter(([v]) => v !== 'unknown')
+    .map(([vendor, data]) => ({
+      vendor,
+      total: data.total,
+      advanced: data.advanced,
+      advanceRate: data.total > 0 ? Math.round((data.advanced / data.total) * 100) : 0,
+      sharePct: submitted.length > 0 ? Math.round((data.total / submitted.length) * 100) : 0,
+      sufficientSample: data.total >= MIN_VENDOR_N,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const identifiedCount = submitted.length - (vendorMap.get('unknown')?.total || 0);
+  const vendorAnalysis = {
+    scope: ['greenhouse', 'lever', 'ashby', 'workday', 'icims'],
+    minSampleForClaim: MIN_VENDOR_N,
+    submitted: submitted.length,
+    identified: identifiedCount,
+    coveragePct: submitted.length > 0 ? Math.round((identifiedCount / submitted.length) * 100) : 0,
+    overallAdvanceRate,
+    breakdown: vendorBreakdown,
+    citation: 'Bommasani et al., Algorithmic Monocultures in Hiring, FAccT 2026 (arXiv:2605.27371)',
   };
 
-  // --- Archetype breakdown ---
-  const archetypeMap = new Map();
-  for (const e of enriched) {
-    const arch = e.report?.archetype || 'Unknown';
-    if (!archetypeMap.has(arch)) archetypeMap.set(arch, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = archetypeMap.get(arch);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const archetypeBreakdown = [...archetypeMap.entries()].map(([archetype, data]) => ({
-    archetype,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
-
-  // --- Blocker analysis ---
-  const blockerCounts = new Map();
-  const totalWithGaps = enriched.filter(e => e.report?.gaps?.length > 0);
-  for (const e of enriched) {
-    if (!e.report?.gaps) continue;
-    for (const gap of e.report.gaps) {
-      const type = extractBlockerType(gap);
-      if (!type) continue;
-      blockerCounts.set(type, (blockerCounts.get(type) || 0) + 1);
-    }
-  }
-  const blockerAnalysis = [...blockerCounts.entries()]
-    .map(([blocker, frequency]) => ({
-      blocker,
-      frequency,
-      percentage: Math.round((frequency / enriched.length) * 100),
-    }))
-    .sort((a, b) => b.frequency - a.frequency);
-
-  // --- Remote policy breakdown ---
-  const remoteMap = new Map();
-  for (const e of enriched) {
-    const policy = e.remoteBucket;
-    if (!remoteMap.has(policy)) remoteMap.set(policy, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = remoteMap.get(policy);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const remotePolicy = [...remoteMap.entries()].map(([policy, data]) => ({
-    policy,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
-
-  // --- Company size breakdown ---
-  const sizeMap = new Map();
-  for (const e of enriched) {
-    const size = e.companySize;
-    if (!sizeMap.has(size)) sizeMap.set(size, { total: 0, positive: 0, negative: 0, self_filtered: 0, pending: 0 });
-    const entry = sizeMap.get(size);
-    entry.total++;
-    entry[e.outcome]++;
-  }
-  const companySizeBreakdown = [...sizeMap.entries()].map(([size, data]) => ({
-    size,
-    ...data,
-    conversionRate: data.total > 0 ? Math.round((data.positive / data.total) * 100) : 0,
-  })).sort((a, b) => b.total - a.total);
+  // --- Via channel analysis (#1596 follow-up): per-agency advance rate ---
+  // Same honesty rules as the vendor analysis above: this reports CHANNEL
+  // YIELD. In an agency-mediated search the highest-leverage decision is which
+  // recruiter relationships to invest in — this shows which ones convert.
+  // Rows only carry `via` when the tracker has the optional Via column
+  // (#1596); without it every bucket is empty and nothing is claimed.
+  const viaChannelAnalysis = buildViaChannelAnalysis(submitted, isAdvanced);
 
   // --- Score threshold analysis ---
-  const positiveScores = scoresByOutcome.positive.filter(s => s > 0);
-  const minPositiveScore = positiveScores.length > 0 ? Math.min(...positiveScores) : 0;
-  const scoreThreshold = {
-    recommended: minPositiveScore > 0 ? Math.floor(minPositiveScore * 10) / 10 : 3.5,
-    reasoning: positiveScores.length > 0
-      ? `Lowest score among positive outcomes is ${minPositiveScore}. No applications below this score led to progress.`
-      : 'Not enough positive outcome data to determine threshold.',
-    positiveRange: positiveScores.length > 0
-      ? `${Math.min(...positiveScores)} - ${Math.max(...positiveScores)}`
-      : 'N/A',
-  };
-
-  // --- Tech stack gaps (from negative + self_filtered outcomes) ---
-  const stackGapCounts = new Map();
-  for (const e of enriched) {
-    if (e.outcome !== 'negative' && e.outcome !== 'self_filtered') continue;
-    if (!e.report?.gaps) continue;
-    for (const gap of e.report.gaps) {
-      // Extract tech keywords from gap descriptions
-      const techs = gap.description.match(/\b(JavaScript|TypeScript|Python|Ruby|Java|Go|Rust|Node\.?js|React|Angular|Vue\.?js|Django|Flask|Rails|PHP|Laravel|Symfony|Kotlin|Swift|C\+\+|C#|\.NET|MongoDB|MySQL|PostgreSQL|Redis|GraphQL|REST|AWS|GCP|Azure|Docker|Kubernetes|Terraform|Supabase|Inngest|React Native)\b/gi);
-      if (techs) {
-        for (const tech of techs) {
-          const normalized = tech.charAt(0).toUpperCase() + tech.slice(1);
-          stackGapCounts.set(normalized, (stackGapCounts.get(normalized) || 0) + 1);
-        }
-      }
-    }
-  }
-  const techStackGaps = [...stackGapCounts.entries()]
-    .map(([skill, frequency]) => ({ skill, frequency }))
-    .sort((a, b) => b.frequency - a.frequency)
-    .slice(0, 15);
+  const scoreThreshold = scoreThresholdFrom(scoresByOutcome.positive, scoresByOutcome.negative);
 
   // --- Generate recommendations ---
   const recommendations = [];
+
+  if (discardReasonRecommendation) recommendations.push(discardReasonRecommendation);
 
   // Geo-restriction recommendation
   const geoBlocker = blockerAnalysis.find(b => b.blocker === 'geo-restriction');
   if (geoBlocker && geoBlocker.percentage >= 20) {
     recommendations.push({
-      action: `Tighten location filters in portals.yml -- ${geoBlocker.percentage}% of applications hit a geo-restriction blocker`,
-      reasoning: `${geoBlocker.frequency} of ${enriched.length} offers are location-restricted (US/Canada-only). These are wasted evaluation effort.`,
+      action: `Review location and work-authorization filters in portals.yml -- ${geoBlocker.frequency}/${blockerBase} entries carrying gaps (${geoBlocker.percentage}%) hit a geo-restriction blocker`,
+      reasoning: `${geoBlocker.frequency} of ${blockerBase} entries carrying gaps are affected by a location or work-authorization restriction. Review these filters before applying to similar roles.`,
       impact: 'high',
     });
   }
@@ -542,32 +1323,67 @@ function analyze() {
     });
   }
 
-  // Score threshold recommendation
-  if (minPositiveScore > 3.0) {
+  if (scoreThreshold.recommended !== null && scoreThreshold.recommended > 3.0) {
     recommendations.push({
       action: `Set minimum score threshold at ${scoreThreshold.recommended}/5 before generating PDFs`,
-      reasoning: `No positive outcomes below ${minPositiveScore}/5. Scores below this are wasted effort.`,
+      reasoning: scoreThreshold.reasoning,
       impact: 'medium',
     });
   }
 
-  // Best archetype recommendation
-  const bestArchetype = archetypeBreakdown.filter(a => a.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
-  if (bestArchetype && bestArchetype.conversionRate > 0) {
+  const bestArchetype = bestDecidedSegment(archetypeBreakdown);
+  if (bestArchetype) {
     recommendations.push({
-      action: `Double down on "${bestArchetype.archetype}" roles (${bestArchetype.conversionRate}% conversion rate)`,
-      reasoning: `${bestArchetype.positive} of ${bestArchetype.total} applications in this archetype led to positive outcomes.`,
+      action: `Double down on "${bestArchetype.archetype}" roles (${bestArchetype.decidedRate}% of decided outcomes advanced, ${bestArchetype.conversionRate}% of all sent)`,
+      reasoning: `${bestArchetype.positive} of ${bestArchetype.decided} decided applications in this archetype advanced (${bestArchetype.awaiting} still awaiting a reply).`,
       impact: 'medium',
     });
   }
 
-  // Remote policy recommendation
-  const bestRemote = remotePolicy.filter(r => r.total >= 2).sort((a, b) => b.conversionRate - a.conversionRate)[0];
-  const worstRemote = remotePolicy.filter(r => r.total >= 2 && r.conversionRate === 0)[0];
+  const worstRemote = worstDecidedSegment(remotePolicy);
   if (worstRemote) {
     recommendations.push({
-      action: `Avoid "${worstRemote.policy}" roles (0% conversion across ${worstRemote.total} applications)`,
-      reasoning: `None of the ${worstRemote.total} applications with "${worstRemote.policy}" policy led to progress.`,
+      action: `Avoid "${worstRemote.policy}" roles (0 of ${worstRemote.decided} decided outcomes advanced, ${worstRemote.submitted} sent)`,
+      reasoning: `None of the ${worstRemote.decided} decided applications with "${worstRemote.policy}" policy led to progress.`,
+      impact: 'medium',
+    });
+  }
+
+  // Channel-monoculture recommendation: a concentrated vendor (>= 25% of
+  // submissions, sufficient sample) whose advance rate is well below EVERY OTHER
+  // channel is a dead channel worth routing around, not re-feeding. The baseline
+  // is leave-one-out (this vendor vs all other submissions) — comparing to an
+  // overall rate that INCLUDES the vendor understates the gap when it dominates.
+  let deadChannel = null;
+  for (const v of vendorBreakdown) {
+    if (!v.sufficientSample || v.sharePct < 25) continue;
+    const others = submitted.filter(e => (e.vendor || 'unknown') !== v.vendor);
+    if (others.length === 0) continue;
+    const othersRate = Math.round((others.filter(isAdvanced).length / others.length) * 100);
+    // Meaningful gap only: the rest of the pipeline must be doing at least
+    // moderately better, so we're not flagging a uniformly cold market.
+    if (v.advanceRate < othersRate && othersRate - v.advanceRate >= 10) {
+      if (!deadChannel || v.advanceRate < deadChannel.advanceRate) deadChannel = { ...v, othersRate };
+    }
+  }
+  if (deadChannel) {
+    recommendations.push({
+      action: `Route ${deadChannel.vendor} companies through referral / direct contact -- ${deadChannel.sharePct}% of your applications flow through it at a ${deadChannel.advanceRate}% advance rate (vs ${deadChannel.othersRate}% through other channels)`,
+      reasoning: `${deadChannel.advanced}/${deadChannel.total} ${deadChannel.vendor} applications advanced past screening, well below your other channels. Under algorithmic monoculture (Bommasani et al., FAccT 2026) a shared screener's rejections are correlated -- re-applying the same profile through the same engine has diminishing returns; a human channel bypasses it. Channel yield, not a discrimination claim.`,
+      impact: 'high',
+    });
+  }
+
+  // Best-converting agency (#1596 follow-up): with a sufficient sample and a
+  // clear lead over the overall pipeline, that recruiter relationship is worth
+  // prioritizing. One recommendation at most — the breakdown shows the rest.
+  const topAgency = viaChannelAnalysis.breakdown
+    .filter(a => a.sufficientSample && a.advanced > 0 && a.advanceRate >= overallAdvanceRate + 10)
+    .sort((a, b) => b.advanceRate - a.advanceRate)[0];
+  if (topAgency) {
+    recommendations.push({
+      action: `Prioritize roles via ${topAgency.agency} -- ${topAgency.advanceRate}% advance rate across ${topAgency.total} submissions (overall: ${overallAdvanceRate}%)`,
+      reasoning: `${topAgency.advanced}/${topAgency.total} applications through ${topAgency.agency} advanced past screening, well above your overall rate. In an agency-mediated search the highest-leverage decision is which recruiter relationships to invest in -- this one converts. Channel yield, not a causal claim.`,
       impact: 'medium',
     });
   }
@@ -575,17 +1391,19 @@ function analyze() {
   // Date range
   const dates = enriched.map(e => e.date).filter(Boolean).sort();
 
+  const byOutcome = Object.fromEntries(
+    OUTCOME_BUCKETS.map((bucket) => [bucket, enriched.filter(e => e.outcome === bucket).length])
+  );
+
   return {
     metadata: {
       total: enriched.length,
       dateRange: { from: dates[0], to: dates[dates.length - 1] },
       analysisDate: new Date().toISOString().split('T')[0],
-      byOutcome: {
-        positive: enriched.filter(e => e.outcome === 'positive').length,
-        negative: enriched.filter(e => e.outcome === 'negative').length,
-        self_filtered: enriched.filter(e => e.outcome === 'self_filtered').length,
-        pending: enriched.filter(e => e.outcome === 'pending').length,
-      },
+      byOutcome,
+      // The same rates as every breakdown row, over the whole tracker — the
+      // one honest place to quote "X% of what I sent advanced".
+      outcomeRates: withOutcomeRates({ total: enriched.length, ...byOutcome }),
     },
     funnel,
     scoreComparison,
@@ -593,8 +1411,16 @@ function analyze() {
     blockerAnalysis,
     remotePolicy,
     companySizeBreakdown,
+    vendorAnalysis,
+    viaChannelAnalysis,
     scoreThreshold,
     techStackGaps,
+    discardReasonStats,
+    // Populations the percentages above are shares of. Exported because a
+    // consumer cannot sanity-check a rate whose denominator is invisible —
+    // that opacity is precisely what let the wrong base survive unnoticed.
+    discardReasonBase,
+    blockerBase,
     recommendations,
   };
 }
@@ -606,7 +1432,7 @@ function printSummary(result) {
     return;
   }
 
-  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, recommendations } = result;
+  const { metadata, funnel, scoreComparison, archetypeBreakdown, blockerAnalysis, remotePolicy, scoreThreshold, techStackGaps, discardReasonStats, recommendations } = result;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Pattern Analysis — ${metadata.analysisDate}`);
@@ -616,8 +1442,7 @@ function printSummary(result) {
   // Funnel
   console.log('CONVERSION FUNNEL');
   console.log('-'.repeat(40));
-  const funnelOrder = ['evaluated', 'applied', 'responded', 'interview', 'offer', 'rejected', 'discarded', 'skip'];
-  for (const status of funnelOrder) {
+  for (const status of FUNNEL_ORDER) {
     if (funnel[status]) {
       const pct = Math.round((funnel[status] / metadata.total) * 100);
       console.log(`  ${status.padEnd(15)} ${String(funnel[status]).padStart(3)} (${pct}%)`);
@@ -635,10 +1460,10 @@ function printSummary(result) {
 
   // Blockers
   if (blockerAnalysis.length > 0) {
-    console.log('\nTOP BLOCKERS');
+    console.log(`\nTOP BLOCKERS (of ${result.blockerBase} entries carrying gaps)`);
     console.log('-'.repeat(40));
     for (const b of blockerAnalysis) {
-      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}% of all)`);
+      console.log(`  ${b.blocker.padEnd(20)} ${String(b.frequency).padStart(2)}x (${b.percentage}%)`);
     }
   }
 
@@ -646,20 +1471,67 @@ function printSummary(result) {
   console.log('\nREMOTE POLICY');
   console.log('-'.repeat(40));
   for (const r of remotePolicy) {
-    console.log(`  ${r.policy.padEnd(20)} ${String(r.total).padStart(2)} total, ${r.positive} positive (${r.conversionRate}%)`);
+    // A segment nobody has answered yet prints n/a, not 0%: silence is not a result.
+    const decidedLabel = r.decidedRate === null ? 'n/a' : `${r.decidedRate}%`;
+    console.log(`  ${r.policy.padEnd(20)} ${String(r.submitted).padStart(2)} sent, ${r.awaiting} awaiting, ${r.positive} positive of ${r.decided} decided (${decidedLabel})`);
   }
 
   // Tech gaps
   if (techStackGaps.length > 0) {
-    console.log('\nTOP TECH STACK GAPS (negative outcomes)');
+    console.log('\nTOP TECH STACK GAPS (negative / discarded outcomes)');
     console.log('-'.repeat(40));
     for (const g of techStackGaps.slice(0, 10)) {
       console.log(`  ${g.skill.padEnd(20)} ${g.frequency}x`);
     }
   }
 
+  // Discard reasons
+  if (discardReasonStats && discardReasonStats.length > 0) {
+    console.log(`\nTOP DISCARD / SKIP REASONS (of ${result.discardReasonBase} self-filtered / discarded / negative entries)`);
+    console.log('-'.repeat(40));
+    for (const d of discardReasonStats.slice(0, 10)) {
+      console.log(`  ${d.reason.padEnd(30)} ${String(d.frequency).padStart(2)}x (${d.percentage}%)`);
+    }
+  }
+
+  // ATS vendor / channel analysis
+  const va = result.vendorAnalysis;
+  if (va && va.breakdown.length > 0) {
+    console.log('\nATS CHANNEL ANALYSIS (community ATS only)');
+    console.log('-'.repeat(40));
+    console.log(`  vendor identified for ${va.identified}/${va.submitted} submissions (${va.coveragePct}% coverage); overall advance rate ${va.overallAdvanceRate}%`);
+    for (const v of va.breakdown) {
+      const flag = v.sufficientSample ? '' : '  (n too small for a claim)';
+      console.log(`  ${v.vendor.padEnd(12)} ${String(v.total).padStart(3)} apps  ${String(v.sharePct).padStart(3)}% share  ${String(v.advanceRate).padStart(3)}% advance${flag}`);
+    }
+    console.log('  Channel yield, not discrimination — see Bommasani et al., FAccT 2026.');
+  }
+
+  // Via channel analysis (#1596): which recruiter relationships convert
+  const via = result.viaChannelAnalysis;
+  if (via && (via.breakdown.length > 0 || via.directSubmitted > 0)) {
+    console.log('\nVIA CHANNEL ANALYSIS (agency vs direct, #1596)');
+    console.log('-'.repeat(40));
+    console.log(`  direct  ${String(via.directSubmitted).padStart(3)} apps  ${String(via.directAdvanceRate).padStart(3)}% advance`);
+    console.log(`  agency  ${String(via.agencySubmitted).padStart(3)} apps  ${String(via.agencyAdvanceRate).padStart(3)}% advance`);
+    if (via.unknownVia > 0) {
+      console.log(`  unknown ${String(via.unknownVia).padStart(3)} apps  (no Via recorded — not counted in either channel)`);
+    }
+    for (const a of via.breakdown) {
+      const flag = a.sufficientSample ? '' : '  (n too small for a claim)';
+      console.log(`    ${a.agency.padEnd(16)} ${String(a.total).padStart(3)} apps  ${String(a.advanceRate).padStart(3)}% advance${flag}`);
+    }
+  }
+
   // Score threshold
-  console.log(`\nSCORE THRESHOLD: ${scoreThreshold.recommended}/5`);
+  // A threshold is printed only when one was actually earned (see
+  // scoreThresholdFrom); a sufficient sample with nothing rejected below the
+  // floor is still an observation.
+  if (scoreThreshold.recommended !== null) {
+    console.log(`\nSCORE THRESHOLD: ${scoreThreshold.recommended}/5`);
+  } else {
+    console.log(`\nSCORE OBSERVATION: lowest positive ${scoreThreshold.observedMinimum ?? 'n/a'}/5 (n=${scoreThreshold.sampleSize}; not a threshold yet)`);
+  }
   console.log(`  ${scoreThreshold.reasoning}`);
 
   // Recommendations
@@ -676,17 +1548,19 @@ function printSummary(result) {
   console.log('');
 }
 
-// --- Run ---
-if (args.includes('--self-test')) {
-  runSelfTest();
+// --- Run (CLI only; guarded so the module is safely importable for tests) ---
+if (isMainModule(import.meta.url)) {
+  if (args.includes('--self-test')) {
+    runSelfTest();
+  }
+
+  const result = analyze();
+
+  if (summaryMode) {
+    printSummary(result);
+  } else {
+    console.log(JSON.stringify(result, null, 2));
+  }
+
+  if (result.error) process.exit(1);
 }
-
-const result = analyze();
-
-if (summaryMode) {
-  printSummary(result);
-} else {
-  console.log(JSON.stringify(result, null, 2));
-}
-
-if (result.error) process.exit(1);

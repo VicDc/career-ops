@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Мультиагентная система поиска работы" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Мультиагентная система поиска работы" width="800"></a>
 </p>
 
 <p align="center">
@@ -15,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>УПОМИНАНИЯ В СМИ</sub></p>
@@ -29,10 +33,12 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops Демо" width="800">
+  <img src="docs/demo.gif" alt="career-ops Демо" width="800">
 </p>
 
 <p align="center"><strong>740+ вакансий оценено · 100+ персонализированных резюме · 1 позиция мечты получена</strong></p>
+
+<p align="center"><sub>Создано и поддерживается: <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Присоединиться_к_сообществу-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
@@ -63,15 +69,15 @@
 
 ## Что это
 
-Career-Ops превращает любой AI-CLI в полноценный командный центр для поиска работы. Вместо ручного ведения таблиц с откликами вы получаете ИИ-пайплайн, который:
+career-ops превращает любой AI-CLI в полноценный командный центр для поиска работы. Вместо ручного ведения таблиц с откликами вы получаете ИИ-пайплайн, который:
 
-- **Оценивает вакансии** по структурированной системе A–F (10 взвешенных параметров)
+- **Оценивает вакансии** по структурированной системе A-H (пять параметров, формирующих оценку 1–5)
 - **Генерирует персонализированные PDF-резюме** — оптимизированные под ATS, адаптированные под каждую вакансию
 - **Сканирует порталы** автоматически (Greenhouse, Ashby, Lever и др.; российские площадки настраиваются в `portals.yml`)
 - **Пакетная обработка** — оценка 10+ вакансий параллельно через суб-агентов
 - **Трекает всё** в единой точке правды с проверками целостности
 
-> **Важно: это НЕ инструмент для массовой рассылки.** Career-ops — это фильтр. Он помогает найти те немногие вакансии, которые стоят вашего времени, из сотен. Система настоятельно рекомендует не откликаться на вакансии с оценкой ниже 4.0/5. Ваше время ценно, как и время рекрутера. Всегда проверяйте перед отправкой.
+> **Важно: это НЕ инструмент для массовой рассылки.** career-ops — это фильтр. Он помогает найти те немногие вакансии, которые стоят вашего времени, из сотен. Система настоятельно рекомендует не откликаться на вакансии с оценкой ниже 4.0/5. Ваше время ценно, как и время рекрутера. Всегда проверяйте перед отправкой.
 
 ## Возможности
 
@@ -85,7 +91,7 @@ Career-Ops превращает любой AI-CLI в полноценный ко
 | **Сканер порталов**           | 45+ предустановленных компаний (международный рынок) + российские площадки (hh.ru, Хабр Карьера, trudvsem.ru и др.) — добавляются вручную в `portals.yml` |
 | **Пакетная обработка**        | Параллельная оценка через `claude -p` воркеры                                                                                                             |
 | **Dashboard TUI**             | Терминальный UI для просмотра, фильтрации и сортировки пайплайна                                                                                          |
-| **Human-in-the-Loop**         | ИИ оценивает и рекомендует, вы решаете и действуете. Система никогда не отправляет отклик сама                                                            |
+| **Human-in-the-Loop**         | ИИ оценивает и рекомендует, вы решаете и действуете. Система никогда не отправляет отклик — окончательный выбор всегда за вами <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                                                            |
 | **Целостность пайплайна**     | Автоматический merge, дедупликация, нормализация статусов, проверки здоровья                                                                              |
 
 ## Быстрый старт
@@ -113,7 +119,7 @@ claude   # или gemini / codex / qwen / opencode — открой здесь �
 <summary><b>Предпочитаешь настроить вручную? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # нужно только для генерации PDF
 claude   # открой свой AI-CLI — он проведёт онбординг при первом запуске
@@ -123,7 +129,7 @@ claude   # открой свой AI-CLI — он проведёт онборди
 
 ## Использование
 
-Career-ops — одна slash-команда с множеством режимов:
+career-ops — одна slash-команда с множеством режимов:
 
 ```
 /career-ops                       → Показать все доступные команды
@@ -154,7 +160,7 @@ Career-ops — одна slash-команда с множеством режим�
 └────────┬─────────┘
          │
 ┌────────┼─────────┐
-│  Оценка A–F      │  Совпадение, пробелы, исследование компенсации, STAR-истории
+│  Оценка A-H      │  Совпадение, пробелы, исследование компенсации, STAR-истории
 │  (читает cv.md)  │
 └────────┬─────────┘
          │
@@ -166,7 +172,7 @@ Career-ops — одна slash-команда с множеством режим�
 
 ## 🇷🇺 Российские площадки
 
-Career-ops поддерживает ключевые российские джоб-борды:
+career-ops поддерживает ключевые российские джоб-борды:
 
 | Площадка            | URL                                        | Тип       | Особенности                                                  |
 | ------------------- | ------------------------------------------ | --------- | ------------------------------------------------------------ |
@@ -206,9 +212,8 @@ Career-ops поддерживает ключевые российские джо
 Встроенный терминальный дашборд для визуального просмотра пайплайна:
 
 ```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+npm run serve:dashboard   # launch the TUI
+npm run build:dashboard   # optional: build the standalone binary
 ```
 
 Возможности: 6 табов фильтрации, 4 режима сортировки, группированный/плоский вид, ленивая подгрузка превью, смена статусов inline.
@@ -250,6 +255,26 @@ career-ops/
 - **Сканер**: Playwright + Greenhouse API + WebSearch
 - **Dashboard**: Go + Bubble Tea + Lipgloss (тема Catppuccin Mocha)
 - **Данные**: Markdown-таблицы + YAML-конфиг + TSV-файлы батчей
+
+## FAQ
+
+**Для чего нужен career-ops?**
+career-ops — это приложение для поиска работы с открытым кодом, запускающийся через CLI. Данное приложение превращает CLI с встроенным AI-агентом в систему, которая будет оценивать, насколько вакансии соответствуют вашему резюме, генерировать файлы в формате PDF, адаптированные под каждый ATS, искать нужного человека для связи, и, конечно же, все будет отслеживаться в одном месте, оставляя окончательное решение за вами. Является первой реализацией CareerOps Manifesto. Подробнее: [career-ops.org](https://career-ops.org).
+
+**Можно ли использовать career-ops бесплатно или на более дешёвой/локальной модели?**
+Да. career-ops не привязан к конкретному CLI и работает с бесплатными и локальными моделями — через OpenRouter, Ollama или любой другой OpenAI-совместимой точкой доступа — поэтому платная подписка необязательна. Ознакомиться с полной настройкой можно в [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md)
+
+**С каким AI CLI работает career-ops?**
+career-ops работает с любым крупным AI CLI — Claude Code, Codex, Gemini / Antigravity, OpenCode, Grok, Qwen и другими — через открытый стандарт Agent Skill Standard, поэтому не привязан к одному поставщику. Используйте уже имеющийся CLI.
+
+**Как установить career-ops на Windows?**
+career-ops работает на Windows. Если навыки не загружаются из-за ошибки с символическими ссылками (symlink error) во время установки, ознакомьтесь с решением в [docs/FAQ.md](docs/FAQ.md). Полная инструкция в [docs/SETUP.md](docs/SETUP.md).
+
+**career-ops отправляет заявки автоматически за меня?**
+Нет. career-ops — это фильтр, а не автоматический рассыльщик. AI оценивает, ранжирует и создаёт черновики. Вы же проверяете их и принимаете решения. Он никогда не отправляет, не посылает и не нажимает ничего за вас — окончательный выбор всегда за вами. Принцип «человек в цикле» является ключевым.
+
+**career-ops бесплатный? с открытым исходным кодом?**
+Да. career-ops бесплатен и имеет открытый исходный код, и для соискателей всегда таким останется — это первая реализация [CareerOps Manifesto](https://career-ops.org/manifesto). Прочтите, и если он отражает ваши убеждения, пожалуйста, подпишите его.
 
 ## Дисклеймер
 

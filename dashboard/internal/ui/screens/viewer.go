@@ -2,6 +2,7 @@ package screens
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -11,12 +12,16 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/model"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 )
 
 // ViewerClosedMsg is emitted when the viewer is dismissed.
 type ViewerClosedMsg struct{}
+
+// ViewerOpenCoverLetterMsg is emitted when the user requests to open the cover letter PDF.
+type ViewerOpenCoverLetterMsg struct{ Path string }
 
 // ViewerUpdateStatusMsg is emitted when a status update is requested from the viewer.
 type ViewerUpdateStatusMsg struct {
@@ -26,21 +31,22 @@ type ViewerUpdateStatusMsg struct {
 
 // ViewerModel implements an integrated file viewer screen.
 type ViewerModel struct {
-	lines         []string
-	renderedLines []string
-	title         string
-	scrollOffset  int
-	width         int
-	height        int
-	theme         theme.Theme
-	app           model.CareerApplication
-	careerOpsPath string
-	statusPicker  bool
-	statusCursor  int
+	lines           []string
+	renderedLines   []string
+	title           string
+	scrollOffset    int
+	width           int
+	height          int
+	theme           theme.Theme
+	app             model.CareerApplication
+	careerOpsPath   string
+	coverLetterPath string
+	statusPicker    bool
+	statusCursor    int
 }
 
 // NewViewerModel creates a new file viewer for the given path.
-func NewViewerModel(t theme.Theme, path, title string, width, height int, app model.CareerApplication, careerOpsPath string) ViewerModel {
+func NewViewerModel(t theme.Theme, careerOpsPath, path, title string, width, height int, app model.CareerApplication) ViewerModel {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		content = []byte("Error reading file: " + err.Error())
@@ -52,16 +58,43 @@ func NewViewerModel(t theme.Theme, path, title string, width, height int, app mo
 	}
 
 	m := ViewerModel{
-		lines:         lines,
-		title:         title,
-		width:         width,
-		height:        height,
-		theme:         t,
-		app:           app,
-		careerOpsPath: careerOpsPath,
+		lines:           lines,
+		title:           title,
+		width:           width,
+		height:          height,
+		theme:           t,
+		app:             app,
+		careerOpsPath:   careerOpsPath,
+		coverLetterPath: parseCoverLetterPath(lines, careerOpsPath),
 	}
 	m.rebuildRender()
 	return m
+}
+
+// parseCoverLetterPath scans the report lines for a "PDF generated: output/..." line
+// inside a "## Cover Letter Draft" section and returns the relative path if the file exists.
+func parseCoverLetterPath(lines []string, careerOpsPath string) string {
+	inCoverSection := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## Cover Letter Draft") {
+			inCoverSection = true
+			continue
+		}
+		if inCoverSection && strings.HasPrefix(trimmed, "## ") {
+			break
+		}
+		if inCoverSection {
+			if m := reCoverLetterPDF.FindStringSubmatch(line); m != nil {
+				relPath := m[1]
+				abs := filepath.Join(careerOpsPath, filepath.FromSlash(relPath))
+				if _, err := os.Stat(abs); err == nil {
+					return relPath
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // rebuildRender recomputes renderedLines from raw lines using the current width.
@@ -105,14 +138,9 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 
 		case "c":
 			m.statusPicker = true
+			// The picker's own current-status-first reordering (see
+			// getStatusPairs) always places this row's status at index 0.
 			m.statusCursor = 0
-			currentNorm := data.NormalizeStatus(m.app.Status)
-			for idx, opt := range statusOptions {
-				if data.NormalizeStatus(opt) == currentNorm {
-					m.statusCursor = idx
-					break
-				}
-			}
 			m.clampScrollOffset()
 			return m, nil
 
@@ -157,6 +185,12 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 				maxScroll = 0
 			}
 			m.scrollOffset = maxScroll
+
+		case "L":
+			if m.coverLetterPath != "" {
+				fullPath := filepath.Join(m.careerOpsPath, filepath.FromSlash(m.coverLetterPath))
+				return m, func() tea.Msg { return ViewerOpenCoverLetterMsg{Path: fullPath} }
+			}
 		}
 
 	case tea.WindowSizeMsg:
@@ -171,7 +205,7 @@ func (m ViewerModel) Update(msg tea.Msg) (ViewerModel, tea.Cmd) {
 func (m ViewerModel) bodyHeight() int {
 	h := m.height - 4 // header + footer + padding
 	if m.statusPicker {
-		h -= (len(statusOptions) + 1)
+		h -= (len(m.currentStatusPairs()) + 1)
 	}
 	if h < 3 {
 		h = 3
@@ -453,11 +487,13 @@ func (m ViewerModel) renderTableBlock(lines []string) []string {
 }
 
 var (
-	reBold       = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	reLink       = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
-	reBareURL    = regexp.MustCompile(`https?://\S*[^\s\)\]\.,;:!?]`)
-	reInlineCode = regexp.MustCompile("`([^`]+)`")
-	reListNumber = regexp.MustCompile(`^(\s*\d+\.\s+)(.*)$`)
+	reBold           = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	reLink           = regexp.MustCompile(`\[([^\]]+)\]\(([^)]+)\)`)
+	reBareURL        = regexp.MustCompile(`https?://\S*[^\s\)\]\.,;:!?]`)
+	reInlineCode     = regexp.MustCompile("`([^`]+)`")
+	reListNumber     = regexp.MustCompile(`^(\s*\d+\.\s+)(.*)$`)
+	reCoverLetterPDF = regexp.MustCompile(`PDF generated:\s*(output/[^\s]+\.pdf)`)
+	reRelPDFPath     = regexp.MustCompile(`output/cv-[^\s\)\]\.,;:!?"']+\.pdf`)
 )
 
 func isHeadingLine(line string) bool {
@@ -506,7 +542,7 @@ func (m ViewerModel) renderInlineElementsAs(line string, baseColor lipgloss.Colo
 	var b strings.Builder
 	rest := line
 	for rest != "" {
-		match := findInlineMatch(rest, codeStyle, boldStyle, linkStyle)
+		match := findInlineMatch(rest, codeStyle, boldStyle, linkStyle, m.careerOpsPath)
 		if match == nil {
 			b.WriteString(baseStyle.Render(rest))
 			break
@@ -525,7 +561,7 @@ type inlineMatch struct {
 	rendered   string
 }
 
-func findInlineMatch(s string, codeStyle, boldStyle, linkStyle lipgloss.Style) *inlineMatch {
+func findInlineMatch(s string, codeStyle, boldStyle, linkStyle lipgloss.Style, careerOpsPath string) *inlineMatch {
 	var best *inlineMatch
 	consider := func(loc []int, rendered func() string) {
 		if loc == nil || (best != nil && loc[0] >= best.start) {
@@ -551,6 +587,26 @@ func findInlineMatch(s string, codeStyle, boldStyle, linkStyle lipgloss.Style) *
 	}
 	if loc := reBareURL.FindStringIndex(s); loc != nil {
 		consider(loc, func() string { return linkStyle.Render(s[loc[0]:loc[1]]) })
+	}
+	if loc := reRelPDFPath.FindStringIndex(s); loc != nil {
+		consider(loc, func() string {
+			relPath := s[loc[0]:loc[1]]
+			styled := linkStyle.Render(relPath)
+			if careerOpsPath == "" {
+				return styled
+			}
+			joined := filepath.Join(careerOpsPath, filepath.FromSlash(relPath))
+			absPath, err := filepath.Abs(joined)
+			if err != nil {
+				return styled
+			}
+			forward := filepath.ToSlash(absPath)
+			if !strings.HasPrefix(forward, "/") {
+				forward = "/" + forward // Windows: C:/... → /C:/...
+			}
+			// OSC 8 hyperlink: ESC ] 8 ; ; URL BEL text ESC ] 8 ; ; BEL
+			return "\x1b]8;;" + "file://" + forward + "\x07" + styled + "\x1b]8;;\x07"
+		})
 	}
 	return best
 }
@@ -656,17 +712,24 @@ func (m ViewerModel) renderFooter() string {
 
 	if m.statusPicker {
 		return style.Render(
-			keyStyle.Render("↑/↓/j/k") + descStyle.Render(" select  ") +
-				keyStyle.Render("Enter") + descStyle.Render(" confirm  ") +
-				keyStyle.Render("Esc/q") + descStyle.Render(" cancel"))
+			keyStyle.Render("↑/↓/j/k") + descStyle.Render(i18n.Current.HelpNav) +
+				keyStyle.Render("Enter") + descStyle.Render(i18n.Current.HelpConfirm) +
+				keyStyle.Render("Esc/q") + descStyle.Render(i18n.Current.HelpCancel))
 	}
 
-	return style.Render(
-		keyStyle.Render("↑↓") + descStyle.Render(" scroll  ") +
-			keyStyle.Render("PgUp/Dn") + descStyle.Render(" page  ") +
-			keyStyle.Render("g/G") + descStyle.Render(" top/end  ") +
-			keyStyle.Render("c") + descStyle.Render(" status  ") +
-			keyStyle.Render("Esc") + descStyle.Render(" back"))
+	// Render standard footer shortcuts
+	footer := keyStyle.Render("↑↓") + descStyle.Render(i18n.Current.HelpScroll) + // nav
+		keyStyle.Render("PgUp/Dn") + descStyle.Render(i18n.Current.HelpPage) + // pagination
+		keyStyle.Render("g/G") + descStyle.Render(i18n.Current.HelpTopEnd) + // top/bottom
+		keyStyle.Render("c") + descStyle.Render(i18n.Current.HelpChange) + // status
+		keyStyle.Render("t") + descStyle.Render(i18n.Current.HelpLanguage) + // language
+		keyStyle.Render("Esc") + descStyle.Render(i18n.Current.HelpBack) // exit
+
+	if m.coverLetterPath != "" {
+		footer += "  " + keyStyle.Render("L") + descStyle.Render(" cover letter")
+	}
+
+	return style.Render(footer)
 }
 
 func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {
@@ -678,8 +741,8 @@ func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {
 
 	case "down", "j":
 		m.statusCursor++
-		if m.statusCursor >= len(statusOptions) {
-			m.statusCursor = len(statusOptions) - 1
+		if m.statusCursor >= len(m.currentStatusPairs()) {
+			m.statusCursor = len(m.currentStatusPairs()) - 1
 		}
 
 	case "up", "k":
@@ -691,7 +754,7 @@ func (m ViewerModel) handleStatusPicker(msg tea.KeyMsg) (ViewerModel, tea.Cmd) {
 	case "enter":
 		m.statusPicker = false
 		m.clampScrollOffset()
-		newStatus := statusOptions[m.statusCursor]
+		newStatus := m.currentStatusPairs()[m.statusCursor].Canonical
 		return m, func() tea.Msg {
 			return ViewerUpdateStatusMsg{
 				App:       m.app,
@@ -712,22 +775,29 @@ func (m ViewerModel) overlayStatusPicker(body string) string {
 		Bold(true)
 
 	var picker []string
-	picker = append(picker, padStyle.Render(borderStyle.Render("Change status:")))
+	picker = append(picker, padStyle.Render(borderStyle.Render(i18n.Current.PickerChangeStatus)))
 
-	for i, opt := range statusOptions {
+	for i, pair := range m.currentStatusPairs() {
 		style := lipgloss.NewStyle().Foreground(m.theme.Text).Width(pickerWidth)
 		if i == m.statusCursor {
 			style = style.Background(m.theme.Overlay).Bold(true)
 		}
 		prefix := "  "
 		if i == m.statusCursor {
-			prefix = "> "
+			prefix = " >"
 		}
-		picker = append(picker, padStyle.Render(style.Render(prefix+opt)))
+		picker = append(picker, padStyle.Render(prefix+style.Render(pair.Display)))
 	}
 
 	bodyLines = append(bodyLines, picker...)
 	return strings.Join(bodyLines, "\n")
+}
+
+// currentStatusPairs resolves the status-change picker options for the
+// application currently open in the viewer, so the picker leads with this
+// row's own status (see getStatusPairs).
+func (m ViewerModel) currentStatusPairs() []StatusPair {
+	return getStatusPairs(data.NormalizeStatus(m.app.Status))
 }
 
 // UpdateAppStatus updates the status of the current application inside the viewer model.

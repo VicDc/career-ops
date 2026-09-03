@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops 멀티 에이전트 취업 시스템" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops 멀티 에이전트 취업 시스템" width="800"></a>
 </p>
 
 <p align="center">
@@ -15,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>소개된 매체</sub></p>
@@ -29,10 +33,12 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Career-Ops 데모" width="800">
+  <img src="docs/demo.gif" alt="career-ops 데모" width="800">
 </p>
 
 <p align="center"><strong>740개 이상의 채용 공고 평가 · 100개 이상의 맞춤형 이력서 생성 · 꿈의 직장 1곳 합격</strong></p>
+
+<p align="center"><sub><a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a>(<a href="https://github.com/santifer">@santifer</a>)가 만들고 유지 관리합니다</sub></p>
 
 <p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/커뮤니티_참여하기-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
   &nbsp;
@@ -61,17 +67,17 @@
 
 ## 이게 뭔가요
 
-Career-Ops는 AI 코딩 CLI를 취업 활동 전체를 관리하는 커맨드 센터로 바꿔줍니다. 스프레드시트에서 수동으로 지원 현황을 관리하는 대신, AI 파이프라인이 알아서 처리합니다:
+career-ops는 AI 코딩 CLI를 취업 활동 전체를 관리하는 커맨드 센터로 바꿔줍니다. 스프레드시트에서 수동으로 지원 현황을 관리하는 대신, AI 파이프라인이 알아서 처리합니다:
 
-- **공고 평가** -- 구조화된 A-F 스코어링 (10개 가중 평가 항목)
+- **공고 평가** -- 구조화된 A-H 평가 (다섯 개 항목이 1-5점으로 산출됨)
 - **맞춤형 PDF 생성** -- JD별로 최적화된 ATS 이력서
 - **포털 자동 스캔** -- Greenhouse, Ashby, Lever, 기업 채용 페이지
 - **일괄 처리** -- 서브 에이전트로 10개 이상의 공고를 병렬 평가
 - **통합 추적** -- 무결성 검사가 포함된 단일 데이터 소스
 
-> **중요: 이 도구는 무차별 지원 도구가 아닙니다.** Career-ops는 필터입니다 -- 수백 개의 공고 중 당신의 시간을 투자할 가치가 있는 소수의 공고를 찾아줍니다. 4.0/5 미만의 공고에는 지원하지 않는 것을 강력히 권장합니다. 당신의 시간도, 채용 담당자의 시간도 소중합니다. 제출 전에 항상 직접 검토하세요.
+> **중요: 이 도구는 무차별 지원 도구가 아닙니다.** career-ops는 필터입니다 -- 수백 개의 공고 중 당신의 시간을 투자할 가치가 있는 소수의 공고를 찾아줍니다. 4.0/5 미만의 공고에는 지원하지 않는 것을 강력히 권장합니다. 당신의 시간도, 채용 담당자의 시간도 소중합니다. 제출 전에 항상 직접 검토하세요.
 
-Career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwright로 채용 페이지를 탐색하고, 키워드 매칭이 아닌 이력서와 JD를 비교 분석하여 적합도를 판단하고, 공고별로 이력서를 맞춤 생성합니다.
+career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwright로 채용 페이지를 탐색하고, 키워드 매칭이 아닌 이력서와 JD를 비교 분석하여 적합도를 판단하고, 공고별로 이력서를 맞춤 생성합니다.
 
 > **참고: 처음 몇 번의 평가는 정확하지 않을 수 있습니다.** 시스템이 아직 당신을 모르기 때문입니다. 이력서, 커리어 스토리, 주요 성과, 선호도, 잘하는 것, 피하고 싶은 것 등 맥락을 알려주세요. 정보를 줄수록 더 정확해집니다. 새로운 리크루터를 온보딩한다고 생각하세요: 첫 주는 당신을 파악하는 시간이고, 그 이후부터 진가를 발휘합니다.
 
@@ -89,7 +95,7 @@ Career-ops는 에이전트 기반으로 작동합니다: Claude Code가 Playwrig
 | **포털 스캐너**        | 45개 이상의 기업 사전 설정 (Anthropic, OpenAI, ElevenLabs, Retool, n8n 등) + Ashby, Greenhouse, Lever, Wellfound 전반의 커스텀 검색 |
 | **일괄 처리**          | `claude -p` 워커로 병렬 평가                                                                                                        |
 | **Dashboard TUI**      | 터미널 UI에서 파이프라인 탐색, 필터링, 정렬                                                                                         |
-| **Human-in-the-Loop**  | AI가 평가하고 추천하면, 당신이 판단하고 행동합니다. 시스템은 절대 지원서를 자동 제출하지 않습니다 -- 최종 결정은 항상 당신의 몫     |
+| **Human-in-the-Loop**  | AI가 평가하고 추천하면, 당신이 판단하고 행동합니다. 시스템은 절대 지원서를 제출하지 않습니다 -- 최종 결정은 항상 당신의 몫 <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->     |
 | **파이프라인 무결성**  | 자동 병합, 중복 제거, 상태 정규화, 헬스 체크                                                                                        |
 
 ## 빠른 시작
@@ -117,7 +123,7 @@ claude   # or gemini / codex / qwen / opencode — open your AI CLI here
 <summary><b>수동으로 설정하고 싶으신가요? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
 claude   # open your AI CLI — it onboards you on first launch
@@ -131,7 +137,7 @@ claude   # open your AI CLI — it onboards you on first launch
 
 ## 사용법
 
-Career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
+career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
 
 ```
 /career-ops                → 사용 가능한 모든 명령어 표시
@@ -161,7 +167,7 @@ Career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
 └──────────┬─────────────┘
            │
 ┌──────────▼─────────────┐
-│  A-F 평가               │  이력서 기반 매칭도 및 갭 분석, 연봉 리서치, STAR 스토리
+│  A-H 평가               │  이력서 기반 매칭도 및 갭 분석, 연봉 리서치, STAR 스토리
 │  (cv.md 참조)           │
 └──────────┬─────────────┘
            │
@@ -191,9 +197,8 @@ Career-ops는 다양한 모드를 가진 하나의 슬래시 커맨드입니다:
 내장 터미널 대시보드로 파이프라인을 시각적으로 탐색할 수 있습니다:
 
 ```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+npm run serve:dashboard   # launch the TUI
+npm run build:dashboard   # optional: build the standalone binary
 ```
 
 기능: 6개의 필터 탭, 4가지 정렬 모드, 그룹/플랫 뷰, 지연 로딩 미리보기, 인라인 상태 변경.
@@ -258,9 +263,9 @@ Santiago입니다 -- Head of Applied AI, 전직 창업자 (직접 사업을 만�
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Star History 차트" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Star History 차트" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 

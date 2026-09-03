@@ -34,23 +34,73 @@
  * so the index can never serve stale reads.
  */
 
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync, statSync, renameSync, rmSync } from 'fs';
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
-import { pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import { pathToFileURL, fileURLToPath } from 'url';
+import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import * as yaml from 'js-yaml';
+import { resolveColumns } from './tracker-parse.mjs';
+import {
+  canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic,
+} from './tracker-utils.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const MD_PATH = process.env.CAREER_OPS_TRACKER || 'data/applications.md';
-const DB_PATH = process.env.CAREER_OPS_TRACKER_DB
-  || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
+const CAREER_OPS = getCareerOpsRoot();
+const MD_PATH = resolveTrackerPath(CAREER_OPS);
 
-// SQLite must never open the source of truth itself (an explicit
-// CAREER_OPS_TRACKER_DB could point both names at the same file).
-if (resolve(MD_PATH) === resolve(DB_PATH)) {
-  console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
-  process.exit(1);
+/**
+ * Where the derived SQLite index lives, resolved at call time.
+ *
+ * This used to be a module-scope `const`, which is the right shape for a CLI —
+ * one process, one invocation, env fixed before node starts — and the wrong one
+ * the moment the module is IMPORTED rather than executed. The first importer in
+ * a process froze the path for every later one, so a subsequent
+ * `process.env.CAREER_OPS_TRACKER_DB = ...` was silently ignored: no error, no
+ * warning, and an assignment that reads as though it took effect.
+ *
+ * That is how the test suite came to create an applications.db outside its own
+ * fixtures (#3506). tests/tracker-busy-timeout.test.mjs pins the variable before
+ * importing this module, but test-all.mjs imports tracker.mjs earlier in the same
+ * process for removeRowByNum, so module scope had already run and openDb() built
+ * its schema at the unpinned path. The test passed either way — busy_timeout
+ * reads back 5000 whichever file was opened — so nothing flagged it.
+ *
+ * Resolving per call costs nothing here (openDb is called once per command) and
+ * makes the documented override mean the same thing to an importer as it does on
+ * the command line.
+ *
+ * MD_PATH stays import-time on purpose: it is the source of truth, every writer
+ * reaches it through openTrackerTransaction(MD_PATH), and a tracker path that
+ * could change underneath an open transaction is a different and worse problem
+ * than the one this solves.
+ *
+ * @returns {string} Absolute or relative path to the derived index.
+ */
+function dbPath() {
+  const path = process.env.CAREER_OPS_TRACKER_DB
+    || (MD_PATH.endsWith('.md') ? MD_PATH.slice(0, -3) + '.db' : MD_PATH + '.db');
+  // SQLite must never open the source of truth itself (an explicit
+  // CAREER_OPS_TRACKER_DB could point both names at the same file). Checked here
+  // rather than at import: a module that exits the process as a side effect of
+  // being imported takes its importer down with it, and the check is only
+  // meaningful at the moment the path is actually used.
+  if (resolve(MD_PATH) === resolve(path)) {
+    console.error(`Error: DB path must differ from the markdown path (${MD_PATH}).`);
+    process.exit(1);
+  }
+  return path;
 }
-const STATES_PATH = 'templates/states.yml';
+
+// templates/states.yml ships with the code, so it is resolved from this module's
+// own directory. It used to be a bare relative path, i.e. resolved against
+// process.cwd(), which made every tracker.mjs command fail from anywhere but the
+// repo root — including the shape the data-root mechanism invites, where you cd
+// to your data directory and run the tool out of the checkout (#3508). Third
+// variant of #3500: that one looked for this file under the data root, this one
+// looked for it under whatever directory the shell happened to be in.
+const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
 
@@ -77,9 +127,15 @@ async function loadSqlite() {
   }
 }
 
-function openDb(DatabaseSync) {
-  mkdirSync(dirname(DB_PATH) || '.', { recursive: true });
-  const db = new DatabaseSync(DB_PATH);
+export function openDb(DatabaseSync) {
+  const path = dbPath();
+  mkdirSync(dirname(path) || '.', { recursive: true });
+  const db = new DatabaseSync(path);
+  // Wait up to 5s for a lock instead of throwing SQLITE_BUSY on the first
+  // contention. The index is read by concurrent callers — a CLI query, a
+  // `set-status` write and the Go TUI dashboard can all hit the same db at
+  // once — and the default busy_timeout of 0 makes any overlap fail instantly.
+  db.exec('PRAGMA busy_timeout = 5000');
   db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
   db.exec(`
     CREATE TABLE IF NOT EXISTS applications (
@@ -115,7 +171,9 @@ function openDb(DatabaseSync) {
 
 function loadStates() {
   if (!existsSync(STATES_PATH)) {
-    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses. Run from the career-ops root.`);
+    // No longer "run from the career-ops root" advice: the path is anchored to
+    // the module, so a miss here is a broken install, not a wrong cwd.
+    console.error(`Error: ${STATES_PATH} not found — cannot validate statuses (broken install: templates/states.yml ships with career-ops).`);
     process.exit(1);
   }
   const doc = yaml.load(readFileSync(STATES_PATH, 'utf-8'));
@@ -143,8 +201,15 @@ function normalizeStatus(raw, states) {
   return states.byKey.get(cleaned) || null;
 }
 
-const SCORE_RE = /^\*{0,2}(\d(?:\.\d)?\/5)\*{0,2}$/;
+const SCORE_RE = /^\*{0,2}(\d+(?:\.\d+)?\/5)\*{0,2}$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseApplicationId(raw) {
+  const text = String(raw ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
 
 // Mojibake left by a UTF-8 → GBK → UTF-8 round trip: an em-dash cell becomes
 // "鈥?" / "鈥�" variants. Only short placeholder cells are repaired — free-text
@@ -157,18 +222,27 @@ function repairPlaceholder(cell) {
 // ── Markdown parsing ────────────────────────────────────────────────
 
 function parseMarkdownRows(text, diag) {
+  const lines = text.split('\n');
+  // Map columns by header name (tracker-parse.mjs, #954) so a customized layout
+  // (e.g. an inserted Location column) can't shift Score into Status. Falls back
+  // to the legacy fixed 9-column layout when no header row is found.
+  const colmap = resolveColumns(lines);
+  // Expected `split('|')` width: highest mapped index + the trailing empty cell.
+  const width = Math.max(...Object.values(colmap)) + 2;
   const rows = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim().startsWith('|')) continue;
-    let cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
-    if (cells.length < 2) continue;
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) continue; // header / separator
-    if (cells.length > 9) {
-      cells = [...cells.slice(0, 8), cells.slice(8).join(' | ')]; // stray pipes → notes
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t.startsWith('|')) continue;
+    let parts = t.split('|').map(c => c.trim());
+    if (parts.length < 3) continue; // needs at least one real cell
+    if ((parts[colmap.num] ?? '') === '#' || /^[-: ]*$/.test(parts.join(''))) continue; // header / separator
+    if (parts.length > width && colmap.notes === width - 2) {
+      // Stray pipes inside the trailing free-text column → fold back into notes.
+      parts = [...parts.slice(0, colmap.notes), parts.slice(colmap.notes, parts.length - 1).join(' | '), ''];
       if (diag) diag.strayPipes++;
     }
-    while (cells.length < 9) cells.push('');
-    rows.push(cells);
+    const at = (k) => (colmap[k] != null ? (parts[colmap[k]] ?? '') : '');
+    rows.push([at('num'), at('date'), at('company'), at('role'), at('score'), at('status'), at('pdf'), at('report'), at('notes')]);
   }
   return rows;
 }
@@ -181,16 +255,21 @@ function parseMarkdownRows(text, diag) {
 // duplicates are all removed.
 export function removeRowByNum(content, num) {
   const target = String(num).trim();
+  const lines = content.split('\n');
+  // Header-aware report-column lookup (#954) — fixed index 7 read the wrong
+  // cell on customized layouts (e.g. with a Location column).
+  const colmap = resolveColumns(lines);
   let removedCount = 0;
   let report = null;
-  const kept = content.split('\n').filter((line) => {
+  const kept = lines.filter((line) => {
     const t = line.trim();
     if (!t.startsWith('|')) return true; // non-table line — keep verbatim
-    const cells = t.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
-    if (cells[0] === '#' || /^[-: ]*$/.test(cells.join(''))) return true; // header / separator
-    if (cells[0] === target) {
+    const parts = t.split('|').map((c) => c.trim());
+    const numCell = parts[colmap.num] ?? '';
+    if (numCell === '#' || /^[-: ]*$/.test(parts.join(''))) return true; // header / separator
+    if (numCell === target) {
       removedCount++;
-      if (report === null) report = cells[7] || null; // report column (index 7)
+      if (report === null) report = (colmap.report != null ? parts[colmap.report] : '') || null;
       return false;
     }
     return true;
@@ -236,8 +315,8 @@ function parseTracker(states) {
       status = canonical;
     }
 
-    let id = parseInt(idRaw, 10);
-    if (!Number.isInteger(id) || id <= 0 || usedIds.has(id)) {
+    let id = parseApplicationId(idRaw);
+    if (id === null || usedIds.has(id)) {
       id = 0; // assign after the pass, once maxId is known
       diag.badId++;
     } else {
@@ -270,7 +349,7 @@ function reportDiagnostics(diag) {
   if (diag.mojibake) console.error(`  ${diag.mojibake} mojibake placeholder cell(s)`);
   if (diag.scoreInStatus) console.error(`  ${diag.scoreInStatus} score(s) sitting in the status column`);
   if (diag.unknownStatus) console.error(`  ${diag.unknownStatus} non-canonical status(es), indexed as Evaluated (original kept in notes)`);
-  if (diag.badId) console.error(`  ${diag.badId} missing/duplicate id(s), reassigned in the index`);
+  if (diag.badId) console.error(`  ${diag.badId} missing/malformed/duplicate id(s), reassigned in the index`);
   if (diag.badDate) console.error(`  ${diag.badDate} malformed date(s), kept as-is`);
   if (diag.strayPipes) console.error(`  ${diag.strayPipes} row(s) with stray pipes, folded into notes`);
   console.error('Fix at the source with `node normalize-statuses.mjs` / `node dedup-tracker.mjs`, then re-sync.');
@@ -328,7 +407,7 @@ async function sync(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   const { apps, diag } = syncIndex(db, states);
-  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${DB_PATH}`);
+  console.error(`Indexed ${apps.length} applications from ${MD_PATH} into ${dbPath()}`);
   reportDiagnostics(diag);
 }
 
@@ -382,8 +461,12 @@ async function query(args) {
     if (!DATE_RE.test(since)) { console.error('Error: --since must be YYYY-MM-DD'); process.exit(1); }
     where.push('date >= ?'); params.push(since);
   }
-  const id = flagValue(args, '--id');
-  if (id) { where.push('id = ?'); params.push(parseInt(id, 10)); }
+  const idRaw = flagValue(args, '--id');
+  if (args.some(arg => arg === '--id' || arg.startsWith('--id='))) {
+    const id = parseApplicationId(idRaw);
+    if (id === null) { console.error('Error: --id must be a positive integer'); process.exit(1); }
+    where.push('id = ?'); params.push(id);
+  }
 
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
@@ -405,8 +488,8 @@ async function history(args) {
   const DatabaseSync = await loadSqlite();
   const db = openDb(DatabaseSync);
   ensureFresh(db, loadStates());
-  const id = parseInt(flagValue(args, '--id') || '', 10);
-  if (!Number.isInteger(id)) { console.error('Error: history requires --id N'); process.exit(1); }
+  const id = parseApplicationId(flagValue(args, '--id'));
+  if (id === null) { console.error('Error: history requires --id N (a positive integer)'); process.exit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { console.error(`Error: no application with id ${id}`); process.exit(1); }
   console.log(`#${app.id} ${app.company} — ${app.role}`);
@@ -422,60 +505,59 @@ async function history(args) {
 // applications.md unless explicitly asked to via --out.
 
 async function exportMd(args) {
-  const DatabaseSync = await loadSqlite();
-  const db = openDb(DatabaseSync);
-  ensureFresh(db, loadStates());
-  const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
-  const out = [
-    '# Applications Tracker',
-    '',
-    HEADER,
-    SEPARATOR,
-    ...rows.map(rowToMarkdown),
-    '',
-  ].join('\n');
-
   const outPath = flagValue(args, '--out');
-  if (!outPath) {
-    process.stdout.write(out);
-    return;
-  }
-  if (existsSync(outPath) && statSync(outPath).isDirectory()) {
+  if (outPath && existsSync(outPath) && statSync(outPath).isDirectory()) {
     console.error(`Error: --out ${outPath} is a directory — pass a file path.`);
     process.exit(1);
   }
-  mkdirSync(dirname(outPath) || '.', { recursive: true });
-  // Never silently clobber — whatever was there is backed up first.
-  if (existsSync(outPath)) {
-    copyFileSync(outPath, outPath + '.bak');
-    console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+
+  const trackerPath = canonicalizeTrackerPath(MD_PATH);
+  const writesTracker = outPath
+    ? canonicalizeTrackerPath(outPath) === trackerPath
+    : false;
+  const trackerTransaction = writesTracker
+    ? await openTrackerTransaction(trackerPath)
+    : null;
+
+  try {
+    const DatabaseSync = await loadSqlite();
+    const db = openDb(DatabaseSync);
+    ensureFresh(db, loadStates());
+    const rows = db.prepare('SELECT * FROM applications ORDER BY pos').all();
+    const out = [
+      '# Applications Tracker',
+      '',
+      HEADER,
+      SEPARATOR,
+      ...rows.map(rowToMarkdown),
+      '',
+    ].join('\n');
+
+    if (!outPath) {
+      process.stdout.write(out);
+      return;
+    }
+    mkdirSync(dirname(outPath) || '.', { recursive: true });
+    // Never silently clobber — whatever was there is backed up first.
+    const writeTarget = writesTracker ? trackerPath : outPath;
+    if (existsSync(writeTarget)) {
+      copyFileSync(writeTarget, writeTarget + '.bak');
+      console.error(`Existing ${outPath} backed up to ${outPath}.bak`);
+    }
+    if (trackerTransaction) trackerTransaction.replace(out);
+    else writeFileAtomic(outPath, out);
+    console.error(`Exported ${rows.length} applications to ${outPath}`);
+  } finally {
+    trackerTransaction?.close();
   }
-  writeFileSync(outPath, out, 'utf-8');
-  console.error(`Exported ${rows.length} applications to ${outPath}`);
 }
 
 // ── Main ────────────────────────────────────────────────────────────
 
-// Atomic file replace via a same-directory temp file + rename, so a reader never
-// sees a partially written applications.md (mirrors merge-tracker's writer).
-function writeFileAtomic(filePath, content) {
-  const tmp = join(dirname(filePath), `.${basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  try {
-    writeFileSync(tmp, content);
-    renameSync(tmp, filePath);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
-}
-
 // `delete --num N` removes one application row from applications.md and rebuilds
 // the derived index. The markdown stays the source of truth: callers (incl. the
-// web) orchestrate this script rather than editing applications.md directly, so
-// the write-gate holds. The write is atomic; callers should still avoid running
-// a delete concurrently with a scan-merge (they share the same file — serialize
-// at the orchestration layer; a shared lock is a follow-up once merge-tracker is
-// import-safe).
+// web) orchestrate this script rather than editing applications.md directly.
+// The read and atomic replacement share merge-tracker's cross-process lock.
 async function deleteApp(args) {
   const num = flagValue(args, '--num');
   if (!num) {
@@ -486,17 +568,33 @@ async function deleteApp(args) {
     console.error(`Error: ${MD_PATH} not found — nothing to delete.`);
     process.exit(1);
   }
-  const { removed, removedCount, report, newContent } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
-  if (!removed) {
-    console.error(`No application numbered ${num} in ${MD_PATH}.`);
-    process.exit(1);
-  }
   if (args.includes('--dry-run')) {
+    const { removed, removedCount, report } = removeRowByNum(readFileSync(MD_PATH, 'utf-8'), num);
+    if (!removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exit(1);
+    }
     console.error(`Would remove application ${num} (${removedCount} row${removedCount > 1 ? 's' : ''}) from ${MD_PATH}.`);
     if (report) console.error(`(report file would be orphaned: ${report})`);
     return;
   }
-  writeFileAtomic(MD_PATH, newContent);
+
+  const trackerTransaction = await openTrackerTransaction(MD_PATH);
+
+  let removal;
+  try {
+    removal = removeRowByNum(trackerTransaction.read(), num);
+    if (!removal.removed) {
+      console.error(`No application numbered ${num} in ${MD_PATH}.`);
+      process.exitCode = 1;
+      return;
+    }
+    trackerTransaction.replace(removal.newContent);
+  } finally {
+    trackerTransaction.close();
+  }
+
+  const { removedCount, report } = removal;
   // Rebuild the derived SQLite index from the now-updated markdown.
   try {
     const states = loadStates();
@@ -523,7 +621,7 @@ async function main() {
   await fn(args);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+if (isMainModule(import.meta.url)) {
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);

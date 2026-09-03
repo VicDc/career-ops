@@ -1,9 +1,13 @@
-# Career-Ops
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/wordmark-dark.svg"><img src="docs/wordmark-light.svg" alt="career-ops" width="250" height="56"></picture></p>
 
-[English](README.md) | [Español](README.es.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md)
+<div align="center">
+
+[English](README.md) | [Español](README.es.md) | [Deutsch](README.de.md) | [Français](README.fr.md) | [Português (Brasil)](README.pt-BR.md) | [한국어](README.ko-KR.md) | [日本語](README.ja.md) | [简体中文](README.cn.md) | [繁體中文](README.zh-TW.md) | [Українська](README.ua.md) | [Русский](README.ru.md) | [Polski](README.pl.md) | [Dansk](README.da.md) | [العربية](README.ar.md) | [हिन्दी](README.hi.md)
+
+</div>
 
 <p align="center">
-  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="Career-Ops Multi-Agent Система Пошуку Роботи" width="800"></a>
+  <a href="https://x.com/santifer"><img src="docs/hero-banner.jpg" alt="career-ops Multi-Agent Система Пошуку Роботи" width="800"></a>
 </p>
 
 <p align="center">
@@ -15,7 +19,7 @@
 <p align="center">
   <a href="https://trendshift.io/repositories/25195" target="_blank"><img src="https://trendshift.io/api/badge/repositories/25195" alt="santifer%2Fcareer-ops | Trendshift" style="width: 245px; height: 54px; vertical-align: middle;" width="245" height="54"/></a>
   &nbsp;&nbsp;
-  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="Career-Ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
+  <a href="https://www.producthunt.com/products/santifer-io?utm_source=badge-featured&utm_medium=badge" target="_blank"><img src="docs/press/producthunt.svg" alt="career-ops on Claude | Product Hunt" style="width: 206px; height: 54px; vertical-align: middle;" width="206" height="54"/></a>
 </p>
 
 <p align="center"><sub>Згадані у</sub></p>
@@ -29,10 +33,12 @@
 ---
 
 <p align="center">
-  <img src="docs/demo.gif" alt="Демо Career-Ops" width="800">
+  <img src="docs/demo.gif" alt="Демо career-ops" width="800">
 </p>
 
 <p align="center"><strong>740+ вакансій оцінено · 100+ персоналізованих резюме · 1 роботу мрії отримано</strong></p>
+
+<p align="center"><sub>Створено та підтримується: <a href="https://santifer.io">Santiago Fernández de Valderrama Aparicio</a> (<a href="https://github.com/santifer">@santifer</a>)</sub></p>
 
 <p align="center">
   <a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/Приєднатися_до_спільноти-Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
@@ -63,17 +69,17 @@
 
 ## Що це таке
 
-Career-Ops перетворює будь-який AI-кодинг CLI на повноцінний командний центр для пошуку роботи. Замість ручного відстеження заявок у таблиці, ви отримуєте AI-pipeline, який:
+career-ops перетворює будь-який AI-кодинг CLI на повноцінний командний центр для пошуку роботи. Замість ручного відстеження заявок у таблиці, ви отримуєте AI-pipeline, який:
 
-- **Оцінює вакансії** за структурованою системою балів A-F (10 зважених параметрів)
+- **Оцінює вакансії** за структурованою оцінкою A-H (п'ять параметрів, що формують оцінку 1–5)
 - **Генерує персоналізовані PDF** — ATS-оптимізовані резюме під кожен опис вакансії
 - **Сканує портали** автоматично (Greenhouse, Ashby, Lever, сторінки компаній)
 - **Пакетна обробка** — оцінка 10+ вакансій паралельно суб-агентами
 - **Відстежує все** в єдиному джерелі даних з перевіркою цілісності
 
-> **Важливо: це НЕ інструмент для масової розсилки.** Career-ops — це фільтр, який допомагає знайти кілька вакансій, вартих вашого часу, серед сотень. Система наполегливо рекомендує не подаватися на вакансії з балом нижче 4.0/5. Ваш час цінний, як і час рекрутера. Завжди перевіряйте все перед подачею заявки.
+> **Важливо: це НЕ інструмент для масової розсилки.** career-ops — це фільтр, який допомагає знайти кілька вакансій, вартих вашого часу, серед сотень. Система наполегливо рекомендує не подаватися на вакансії з балом нижче 4.0/5. Ваш час цінний, як і час рекрутера. Завжди перевіряйте все перед подачею заявки.
 
-Career-ops працює агентно: Claude Code переходить на кар'єрні сторінки за допомогою Playwright, оцінює відповідність, аналізуючи ваше резюме відносно опису вакансії (не за ключовими словами), та адаптує ваше резюме під кожну вакансію.
+career-ops працює агентно: Claude Code переходить на кар'єрні сторінки за допомогою Playwright, оцінює відповідність, аналізуючи ваше резюме відносно опису вакансії (не за ключовими словами), та адаптує ваше резюме під кожну вакансію.
 
 > **Зверніть увагу: перші оцінки будуть не ідеальними.** Система ще не знає вас. Дайте їй контекст — ваше резюме, вашу кар'єрну історію, ваші досягнення, уподобання, сильні сторони, що хочете уникати. Чим більше ви її "навчаєте", тим краще вона стає. Уявіть, що ви вводите в курс справ нового рекрутера: перший тиждень він вивчає вас, а потім стає незамінним.
 
@@ -91,7 +97,7 @@ Career-ops працює агентно: Claude Code переходить на к
 | **Сканер порталів**           | 45+ попередньо налаштованих компаній (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + кастомні запити через Ashby, Greenhouse, Lever, Wellfound |
 | **Пакетна обробка**           | Паралельна оцінка з `claude -p` воркерами                                                                                                        |
 | **Дашборд TUI**               | Термінальний інтерфейс для перегляду, фільтрації та сортування вашого конвеєра                                                                   |
-| **Human-in-the-Loop**         | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку — остаточне рішення завжди за вами                                |
+| **Human-in-the-Loop**         | AI оцінює та рекомендує, ви вирішуєте та дієте. Система ніколи не подає заявку — остаточне рішення завжди за вами <!-- hitl: absolute guarantee. Do not add "automatically", "by itself", "without your permission" or any other hedge when translating this row. -->                                |
 | **Цілісність конвеєра**       | Автоматичне злиття, дедуплікація, нормалізація статусів, перевірки стану                                                                         |
 
 ## Швидкий старт
@@ -120,7 +126,7 @@ claude   # or gemini / codex / qwen / opencode — open your AI CLI here
 <summary><b>Бажаєте налаштувати вручну? (git clone)</b></summary>
 
 ```bash
-git clone https://github.com/santifer/career-ops.git
+git clone https://github.com/career-ops-hq/career-ops.git
 cd career-ops && npm install
 npx playwright install chromium   # only needed for PDF generation
 claude
@@ -134,7 +140,7 @@ claude
 
 ## Використання
 
-Career-ops — це одна слеш-команда з кількома режимами:
+career-ops — це одна слеш-команда з кількома режимами:
 
 ```text
 /career-ops                → Показати всі доступні команди
@@ -165,7 +171,7 @@ Career-ops — це одна слеш-команда з кількома реж�
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  Оцінка A-F      │  Відповідність, прогалини, дослідження компенсації, STAR-історії
+│  Оцінка A-H      │  Відповідність, прогалини, дослідження компенсації, STAR-історії
 │  (читає cv.md)   │
 └────────┬─────────┘
          │
@@ -195,9 +201,8 @@ Career-ops — це одна слеш-команда з кількома реж�
 Вбудований термінальний дашборд дозволяє візуально переглядати поточний стан вашого конвеєра:
 
 ```bash
-cd dashboard
-go build -o career-dashboard .
-./career-dashboard --path ..
+npm run serve:dashboard   # launch the TUI
+npm run build:dashboard   # optional: build the standalone binary
 ```
 
 Функції: 6 вкладок фільтрації, 4 режими сортування, групований/плаский вигляд, lazy-load попереднього перегляду, inline зміна статусів.
@@ -264,9 +269,9 @@ career-ops/
 
 <a href="https://www.star-history.com/?repos=santifer%2Fcareer-ops&type=timeline&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
-   <img alt="Графік історії зірок" src="https://api.star-history.com/chart?repos=santifer/career-ops&type=timeline&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
+   <img alt="Графік історії зірок" src="https://api.star-history.com/chart?repos=career-ops-hq/career-ops&type=timeline&legend=top-left" />
  </picture>
 </a>
 
@@ -283,11 +288,11 @@ career-ops/
 
 ## Контриб'ютори
 
-<a href="https://github.com/santifer/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=santifer/career-ops" alt="Контриб'ютори santifer/career-ops" />
+<a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" alt="Контриб'ютори career-ops-hq/career-ops" />
 </a>
 
-Отримали роботу завдяки career-ops? [Поділіться своєю історією!](https://github.com/santifer/career-ops/issues/new?template=i-got-hired.yml)
+Отримали роботу завдяки career-ops? [Поділіться своєю історією!](https://github.com/career-ops-hq/career-ops/issues/new?template=i-got-hired.yml)
 
 ## Ліцензія
 

@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url';
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const EXTENSION_DIR = resolve(ROOT, 'vendor', 'ublock-lite');
 const RELEASE_API = 'https://api.github.com/repos/uBlockOrigin/uBOL-home/releases/latest';
-const ASSET_RE = /^uBOLite_.*\.chromium\.mv3\.zip$/;
+const ASSET_RE = /^uBOLite_.*\.chromium(\.mv3)?\.zip$/;
 
 function installedVersion() {
   const manifest = join(EXTENSION_DIR, 'manifest.json');

@@ -15,8 +15,16 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 9. Reorder experience bullets by JD relevance
 10. Inject keywords naturally into existing achievements
 11. Generate the `.tex` file using `templates/cv-template.tex`
-12. Write to `output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex`
-13. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf`
+12. Derive the output location from the report (`--report=<path>` — the same file read for `{{SUMMARY}}`):
+    - Parse the report's H1 line, format `# Evaluation: {Company} — {Role}`. Split once on the first occurrence of ` — `; if the em dash is absent, fall back to ` -- ` (see `reports/030-capgemini-agentic-ai-expert-2026-07-02.md`). Text before the separator is `{company_raw}`, text after is `{role_raw}`.
+    - **Slugify procedure** (used for every slug below, in this order): drop parenthetical content (`(Barcelona)`, `(m/f/d)`, `(Remote)`) → lowercase → convert source `/` and `-` to spaces → strip remaining non-alphanumeric characters, keeping spaces → collapse repeated spaces → convert spaces to hyphens → collapse repeated hyphens.
+    - Slugify `{company_raw}` → `{company_slug}` and `{role_raw}` → `{role_slug}`. Cap `{role_slug}` at 5 words after slugifying (truncate, never pad). Do not cap `{company_slug}`.
+    - `{candidate_slug}` = the same slugify procedure applied to `config/profile.yml → candidate.name`.
+    - `{report_num}` = leading numeric prefix of the report filename (`reports/{report_num}-….md`).
+    - `{out_dir}` = `output/{report_num}-{company_slug}-{role_slug}/`. Create it if it does not exist.
+    - `{timestamp}` = current time as `YYYYMMDD-HHMM`.
+    Write the `.tex` to `{out_dir}/cv-{candidate_slug}-{timestamp}.tex`. The filename carries no company, role, or offer reference — the directory does.
+13. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{timestamp}.tex {out_dir}/cv-{candidate_slug}-{timestamp}.pdf`
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
 **Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.

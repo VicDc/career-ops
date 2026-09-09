@@ -54,8 +54,17 @@ latex:
 }
 ```
 
-7. Run: `node patch-latex-content.mjs <source.tex> /tmp/cv-patches-{company}.json output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex`
-8. Run: `node generate-latex.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.tex output/cv-{candidate}-{company}-{YYYY-MM-DD}.pdf --compile-only`
+7. Derive the output location from the report read in step 4:
+    - Parse the report's H1 line, format `# Evaluation: {Company} — {Role}`. Split once on the first occurrence of ` — `; if the em dash is absent, fall back to ` -- ` (see `reports/030-capgemini-agentic-ai-expert-2026-07-02.md`). Text before the separator is `{company_raw}`, text after is `{role_raw}`.
+    - **Slugify procedure** (used for every slug below, in this order): drop parenthetical content (`(Barcelona)`, `(m/f/d)`, `(Remote)`) → lowercase → convert source `/` and `-` to spaces → strip remaining non-alphanumeric characters, keeping spaces → collapse repeated spaces → convert spaces to hyphens → collapse repeated hyphens.
+    - Slugify `{company_raw}` → `{company_slug}` and `{role_raw}` → `{role_slug}`. Cap `{role_slug}` at 5 words after slugifying (truncate, never pad). Do not cap `{company_slug}`.
+    - `{candidate_slug}` = the same slugify procedure applied to `config/profile.yml → candidate.name`.
+    - `{report_num}` = leading numeric prefix of the report filename (`reports/{report_num}-….md`).
+    - `{timestamp}` = current time as `YYYYMMDD-HHMM`.
+    - `{out_dir}` = `output/{report_num}-{company_slug}-{role_slug}/`. **Fallback:** step 4 does not guarantee a report — if no report path resolves, or the file has no H1 in the expected format, set `{out_dir}` = `output/adhoc-{timestamp}/` and stop there. Do not attempt to derive company or role from the JD, the tracker, or any other source.
+    - Create `{out_dir}` if it does not exist. The standard filename below is identical in both branches.
+    Then run: `node patch-latex-content.mjs <source.tex> /tmp/cv-patches-{company}.json {out_dir}/cv-{candidate_slug}-{timestamp}.tex`
+8. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{timestamp}.tex {out_dir}/cv-{candidate_slug}-{timestamp}.pdf --compile-only`
 9. Report: family, slot count, patched count, `.tex` path, `.pdf` path (or compile error)
 
 **Requires:** `tectonic` or `pdflatex` on PATH (same as `latex` mode).

@@ -1,4 +1,4 @@
-# Mode: job — Full A-G Evaluation
+# Mode: job — Full A-H Evaluation
 
 When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F evaluation + G legitimacy):
 
@@ -6,7 +6,7 @@ When the candidate pastes a job (text or URL), ALWAYS deliver the 7 blocks (A-F 
 
 ## Liveness gate (URL inputs)
 
-When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-G evaluation, report, and PDF on phantom content.
+When the candidate pastes a **URL** (not JD text), confirm the posting is still live before doing any evaluation. A dead link must never reach Block A — a 404/expired page wastes a full A-H evaluation, report, and PDF on phantom content.
 
 1. Get the page content: if you arrived here from `auto-pipeline` (its Step 0.5 already navigated and cleared the link), reuse that snapshot — do not navigate again. On a direct URL entry, navigate with Playwright (`browser_navigate` + `browser_snapshot`) and read the title, URL, and visible content. **Opt-in:** if `scan.extractor: cli` is set in `config/profile.yml`, run `node browser-extract.mjs <url>` (default `--mode jd`) instead and use its compact `{ "url", "title", "text" }` (the distilled JD main text rather than the full page a11y tree — fewer tokens for the model, board-dependent), **falling back silently** to `browser_navigate` + `browser_snapshot` if it errors or is missing.
 2. Classify the posting:
@@ -23,7 +23,7 @@ If `data/blacklist.md` exists, check the posting's company against it before Blo
 
 1. On a hit, **stop before Block A** and surface the candidate's own recorded decision:
    > "{Company} is on your blacklist (since {Since}): *{Reason}*. Do you still want me to evaluate this posting?"
-2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-G evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
+2. Wait for an explicit answer — never silently refuse, never silently proceed. The candidate's call always wins (same HITL spirit as the score < 4.0 rule): an explicit yes runs the full A-H evaluation as normal (note the override in the report notes); anything else stops here with no evaluation, report, or CV.
 3. No match, or no `data/blacklist.md` → proceed. A blacklist entry never changes any score anywhere — it is a gate, not a signal.
 
 ## Bounded Research Budget
@@ -741,9 +741,16 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## Keywords extracted
 (list of 15-20 keywords from the JD for ATS optimization)
+
+## Job Description (archived verbatim)
+(the posting's full text, pasted verbatim — see requirement below)
 ```
 
 **Machine Summary (required):** every report carries a `## Machine Summary` YAML fence directly after the header — same schema, exact field names, and rules as the "Machine Summary" block in `batch/batch-prompt.md` (do not duplicate the schema here; that file is the source of truth). It includes `advertised_comp`: the JD's own salary figure **verbatim** (e.g. `"80-90k EUR"`), or `null` when the JD states nothing — never estimated, never replaced with researched market data. This key seeds the advertised salary observation read by `node salary-gap.mjs`. It also includes `risk_summary`: the Risk Summary block mirrored as a map (schema and enum values in `batch/batch-prompt.md`), and `requirement_importance`: Block B's table mirrored row by row, carrying each row's evidence tier, importance band and match (`[]` when the JD yields no usable requirement list). The `inferred` cap from Block B's gate holds in the YAML too — `importance` is never `critical` or `high` when `evidence: inferred`.
+
+**JD archival (required, #2789):** every report MUST carry a `## Job Description (archived verbatim)` section with the posting's full text pasted as-is — never summarized, never paraphrased. A `**URL:**` header alone is not an archive: it is a live pointer that rots once the posting closes or gets taken down, which reliably happens somewhere in the weeks between applying and a later interview round, and there is no way to recover the original requirements after that. This is the primary mechanism, not a fallback — the report is the one artifact guaranteed to get written and tracked, unlike a separate `jds/` file. If the JD is very long, write it to `archive-posting.mjs --report={num}` instead (or another `{num}-...`-prefixed capture) and, in place of the text, put in this section **exactly** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` — `check-jd-archive.mjs` only credits this canonical pointer sentence when it resolves back to that report's number via `findCaptureForReport`; a slug-only `jds/{slug}.md` with no report number does not validate here. This exact phrasing matters: the check only treats a section as a pointer (requiring resolution) when the section is nothing but this sentence — any additional prose alongside it is read as the archived text itself, not a pointer, so don't mix the two. Slug-only captures remain fine for `jd-skill-gap.mjs` run standalone, outside a full evaluation, where there is no report to link back to. `check-jd-archive.mjs` validates every `reports/*.md` has one form or the other and is wired into `test-all.mjs` — a report missing both is a test failure.
+
+Not every JD source is a scannable ATS API or even a URL — some only ever exist as a pasted screenshot from a company on a custom/uncommon ATS with no API surface. Whatever posting-date text is visible on the source — `Posted 3 days ago`, an explicit date, etc. — transcribe it as the first line of the archived section regardless of source format (URL, pasted text, or screenshot): `Posted: {date or relative string as shown}`, or `Posted: not visible in source` when genuinely absent. Never substitute the report file's own filesystem mtime/creation time for this — it's fragile (overwritten by later edits, reset by sync-tool/git operations) and conceptually wrong (it records when the candidate processed the JD, not when the employer posted it).
 
 ### 2. Record in tracker
 

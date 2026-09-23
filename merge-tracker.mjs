@@ -14,7 +14,7 @@
  * Run: node career-ops/merge-tracker.mjs [--dry-run] [--verify]
  */
 
-import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync, copyFileSync, rmSync } from 'fs';
 import { join, basename, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -39,6 +39,70 @@ const CAREER_OPS = getCareerOpsRoot();
 // writer agrees on the same canonical path (and therefore the same lock).
 const APPS_FILE = resolveTrackerPath(CAREER_OPS);
 const TRACKER_DIR = dirname(APPS_FILE);
+
+// --- Pre-write snapshots ---------------------------------------------------
+// Every write to the tracker goes through writeTracker(), which copies the
+// current on-disk state aside first. The tracker is the one file in the
+// project with no git history (`data/*` is gitignored), so a bad fuzzy merge
+// was unrecoverable except by hand.
+//
+// Snapshots live next to the tracker, in <tracker dir>/backups/ — that is
+// data/backups/ in the standard layout, already covered by the `data/*` rule
+// in .gitignore. Deriving the dir from TRACKER_DIR means a CAREER_OPS_TRACKER
+// override keeps its snapshots beside itself instead of in a stale location;
+// when that override points outside data/, the snapshot dir is NOT gitignored
+// by default, so snapshotTracker() says so once per run.
+//
+// SNAPSHOT_KEEP is 20 to match the rotation depth of the user-layer backup
+// script the author runs alongside this one. That script is not in the repo:
+// `/scripts/*.ps1` is gitignored, since those are local operator tools that
+// touch personal data. So 20 is a deliberate choice here, not a value derived
+// from anything a reader can open — change it freely if 20 is wrong for you.
+const SNAPSHOT_DIR = join(TRACKER_DIR, 'backups');
+const SNAPSHOT_KEEP = 20;
+let snapshotTaken = false;
+
+function snapshotStamp(d = new Date()) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    + `T${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function pruneSnapshots(base) {
+  const stale = readdirSync(SNAPSHOT_DIR)
+    .filter(f => f.startsWith(`${base}-`) && f.endsWith('.md'))
+    .sort()
+    .reverse()
+    .slice(SNAPSHOT_KEEP);
+  for (const f of stale) rmSync(join(SNAPSHOT_DIR, f), { force: true });
+  return stale.length;
+}
+
+function snapshotTracker() {
+  if (snapshotTaken) return null;          // one snapshot per run, see writeTracker
+  if (!existsSync(APPS_FILE)) return null; // first run: nothing to preserve yet
+  mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  if (basename(TRACKER_DIR) !== 'data') console.log(`⚠️  ${SNAPSHOT_DIR} is outside data/ — add it to .gitignore, snapshots hold personal data.`);
+  const base = basename(APPS_FILE, '.md');
+  // Two runs inside the same second must not overwrite each other's snapshot.
+  let dest = join(SNAPSHOT_DIR, `${base}-${snapshotStamp()}.md`);
+  for (let i = 2; existsSync(dest); i++) {
+    dest = join(SNAPSHOT_DIR, `${base}-${snapshotStamp()}.${i}.md`);
+  }
+  copyFileSync(APPS_FILE, dest);
+  snapshotTaken = true;
+  const pruned = pruneSnapshots(base);
+  console.log(`🗂️  Snapshot: ${join(basename(SNAPSHOT_DIR), basename(dest))}`
+    + (pruned ? ` (rimossi ${pruned} oltre i ${SNAPSHOT_KEEP} più recenti)` : ''));
+  return dest;
+}
+
+// The only writer of the tracker in this file. Snapshot first, then the
+// existing atomic write. Never call writeFileAtomic(APPS_FILE, …) directly.
+function writeTracker(content) {
+  snapshotTracker();
+  writeFileAtomic(APPS_FILE, content);
+}
 // CAREER_OPS_ADDITIONS overrides the additions dir (used by tests, mirrors CAREER_OPS_TRACKER).
 const ADDITIONS_DIR = process.env.CAREER_OPS_ADDITIONS
   ? process.env.CAREER_OPS_ADDITIONS
@@ -821,7 +885,7 @@ if (MIGRATE) {
   if (DRY_RUN) {
     console.log(`🔎 Migration (dry-run): ${changed} row(s) would be rewritten in ${basename(APPS_FILE)}`);
   } else {
-    writeFileAtomic(APPS_FILE, migrated.join('\n'));
+    writeTracker(migrated.join('\n'));
     console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === CAREER_OPS ? 'repo root' : 'data/'}`);
   }
   process.exit(0);
@@ -857,7 +921,7 @@ if (MIGRATE_VIA) {
   if (DRY_RUN) {
     console.log(`🔎 Migration (dry-run): Via column would be inserted after Company (${changed} table line(s) rewritten)`);
   } else {
-    writeFileAtomic(APPS_FILE, migrated.join('\n'));
+    writeTracker(migrated.join('\n'));
     console.log(`✅ Migration: inserted Via column after Company (${changed} table line(s) rewritten). Direct applications are marked —.`);
   }
   process.exit(0);
@@ -1024,7 +1088,7 @@ if (BACKFILL_URLS) {
   if (DRY_RUN) {
     console.log(`🔎 Backfill URLs (dry-run): would fill ${filled} row(s). (${summary})`);
   } else {
-    writeFileAtomic(APPS_FILE, backfilled.join('\n'));
+    writeTracker(backfilled.join('\n'));
     console.log(`✅ Backfill URLs: ${summary}.`);
   }
   trackerLock.release();
@@ -1066,7 +1130,7 @@ if (!existsSync(ADDITIONS_DIR)) {
   // time rather than at insert time.
   const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
   if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTracker(appLines.join('\n'));
   if (DRY_RUN) console.log('(dry-run — no changes written)');
   trackerLock.release();
   process.exit(0);
@@ -1080,7 +1144,7 @@ if (tsvFiles.length === 0) {
   // time rather than at insert time.
   const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
   if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTracker(appLines.join('\n'));
   if (DRY_RUN) console.log('(dry-run — no changes written)');
   trackerLock.release();
   process.exit(0);
@@ -1548,7 +1612,7 @@ if (newLines.length > 0) {
 if (!DRY_RUN) {
   const moved = sortTrackerRowsInPlace(appLines);
   if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-  writeFileAtomic(APPS_FILE, appLines.join('\n'));
+  writeTracker(appLines.join('\n'));
 
   // Move processed files to merged/ — but only the ones actually applied.
   // Archiving a TSV whose row never reached the tracker is what turns a bug

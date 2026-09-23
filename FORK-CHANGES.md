@@ -62,6 +62,7 @@ nascita, nazionalità). Nel fork c'è solo la regola `.gitignore`
 
 | Data | Commit | Modifica | Stato upstream |
 |------|--------|----------|----------------|
+| 2026-09-23 | `4c1a354`..`fb7a366` | Cronologia locale dei commit del 23/09 riscritta prima di qualunque push: fixture, esempi e un messaggio di commit contenevano righe reali del CV. Backup completo in un bundle fuori dal repo. | **solo fork** |
 | 2026-08-08 | `2c7af94` | Audit di contesto in `data/` (poi rimasto nella history pubblica). | **solo fork** |
 | 2026-08-09 | `5e429e1` | `data/cv-proposed-changes.md` (poi rimasto nella history pubblica). | **solo fork** |
 | 2026-08-09 | `a462985` | `modes/_custom.md` e `voice-dna.md` tolti da git. | **solo fork** |

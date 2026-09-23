@@ -227,3 +227,6 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+
+# Europass master CV (photo, date of birth, nationality): personal data, never commit
+europass/

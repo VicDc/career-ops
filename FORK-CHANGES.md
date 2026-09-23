@@ -35,8 +35,11 @@ Stato upstream:
 | 2026-09-23 | `52d5152` | Il report sceglie i bullet: riga opzionale `bullets: A | B` sotto ogni voce della Relevance Selection, selettori = inizio del bullet in `cv.md` (per i progetti la chiave in grassetto), ordine = ordine di stampa. Selettore sconosciuto o troppi bullet: errore, il CV non viene generato. Formato documentato in `modes/oferta.md`; test in `tests/latex-bullet-selection.test.mjs`. | Con i limiti fissi restavano i primi bullet di `cv.md`, non quelli che rispondono all'offerta (in un report di prova cadeva proprio il bullet più rilevante per l'offerta). | **solo fork** (dipende dal generatore del fork) |
 | 2026-09-23 | `6378453` | CV in due lingue: `--lang=it` stampa il testo di `cv.it.md` (specchio italiano di `cv.md`, gitignored), titoli di sezione e `babel` in italiano, paese nel contatto tradotto. Voci e bullet si scelgono sempre su `cv.md`, il testo si prende alla stessa posizione; conteggi diversi fra i due file = errore. Summary dal report per lingua: `## Tailored CV Summary (en)` / `(it)`; un summary senza etichetta si usa solo se è nella lingua del CV (stima a parole frequenti), altrimenti quello del file CV. `modes/oferta.md`, `modes/latex.md` aggiornati; test in `tests/latex-bullet-selection.test.mjs`. | Un report con annuncio in italiano produceva summary italiano e bullet inglesi nello stesso CV. | **solo fork** |
 
-Il CV Europass (barra laterale, paracol, foto) vive fuori dal progetto ed è
-aggiornato a mano: non è nel fork, per scelta (`modes/_custom.md`).
+Il CV Europass (barra laterale, paracol, foto) è un formato standard dal
+2026-09-23: il master sta in `europass/`, **gitignored** (foto, data di
+nascita, nazionalità). Nel fork c'è solo la regola `.gitignore`
+(commit _questo commit_); il file non verrà mai pubblicato. Regole d'uso in
+`modes/_custom.md`.
 
 ## Tracker
 

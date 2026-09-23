@@ -229,4 +229,11 @@ documents/*
 data/intake-state.json
 
 # Europass master CV (photo, date of birth, nationality): personal data, never commit
-europass/
+/europass/
+
+# LaTeX build artifacts next to fork templates (compiled in place by editors)
+templates-fork/**/*.aux
+templates-fork/**/*.log
+templates-fork/**/*.out
+templates-fork/**/*.pdf
+templates-fork/**/*.synctex.gz

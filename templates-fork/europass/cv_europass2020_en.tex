@@ -1,0 +1,516 @@
+% !TEX program = xelatex
+% !TEX encoding = UTF-8
+% ================================================================
+% File:      cv_europass2020_en.tex  (STANDARD ANONIMO)
+% Layout:    Europass 2020, barra laterale -- derivato dal master
+%            personale v3.2 (europass/cv_europass2020_en_v32.tex,
+%            gitignored). Qui nessun dato personale: solo segnaposto
+%            fra [parentesi quadre].
+% Compile:   xelatex cv_europass2020_en.tex   (due passate)
+% ================================================================
+% COME SI USA
+%   1. Copiare questo file in una cartella di lavoro (per un'offerta:
+%      output/{report_dir}/), con accanto:
+%        foto.jpg                       (facoltativa: senza, resta la
+%                                        sagoma colorata vuota)
+%        mi/MaterialIcons-Regular.ttf   (oppure font installato)
+%   2. Sostituire ogni [segnaposto] con fatti presi da cv.md /
+%      cv.it.md, article-digest.md e dal report dell'offerta.
+%   3. Compilare due volte (serve per "Page N / M").
+%
+% ATTENZIONE ALL'USO. Foto, data di nascita e nazionalita' sono
+% campi attesi in area UE continentale (istituzioni europee, EPSO,
+% agenzie, Germania, Spagna, Belgio). NON inviarli a datori di
+% lavoro in Regno Unito, Irlanda o Stati Uniti: commentare \ecvphoto
+% e la riga con data di nascita e nazionalita'.
+%
+% Registro: inglese piano (B1-B2), decimali con il punto (es. 12.5%).
+%
+% NOTE DI COMPOSIZIONE (dal master v3.1-v3.2, restano valide)
+%   - \ecvblock rende ogni voce indivisibile fra pagine: usarlo per
+%     TUTTE le voci, altrimenti la spaziatura cambia fra voci.
+%   - Barra laterale a pagina 2 con \vspace*{\fill}\newpage:
+%     in paracol \columnbreak non esiste.
+%   - \ecvlinkplain ovunque: la sottolineatura di \ecvlink copre
+%     l'underscore negli URL.
+%   - Numeri di telefono in \mbox con tilde, o si spezzano.
+%   - Icone marcate come decorative con accsupp: l'estrazione testo
+%     (ATS) non riporta glifi spuri.
+% ================================================================
+
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[a4paper,top=1.3cm,bottom=1.8cm,left=1.3cm,right=1.4cm,footskip=1.0cm]{geometry}
+\usepackage{fontspec}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric}
+\usepackage{paracol}
+\usepackage{enumitem}
+\usepackage{ragged2e}
+\usepackage{soul}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{accsupp}     % testo alternativo per le icone (v3.1)
+
+% ----------------------------------------------------------------
+% ICONE -- Google Material Design Icons (Apache 2.0)
+% ----------------------------------------------------------------
+% Il font va messo in ./mi/MaterialIcons-Regular.ttf
+% Scaricabile da fonts.google.com/icons, oppure da terminale:
+%     npm pack @fontsource/material-icons
+%     tar xzf fontsource-material-icons-*.tgz
+% e convertendo package/files/material-icons-latin-400-normal.woff2
+% in TTF con quel nome.
+%
+% PERCHE' PER CODEPOINT E NON PER NOME.
+% Material Icons e' un font a legature: scrivendo "translate" il
+% font dovrebbe sostituire la parola con il simbolo. Quella
+% sostituzione sta pero' nella feature OpenType "rlig", e la sua
+% attivazione dipende dal motore e dalla versione di fontspec: se
+% non scatta, in pagina compare la parola scritta per esteso dentro
+% il cerchio. Indirizzare il glifo per codepoint aggira del tutto
+% il problema, perche' non richiede nessuna feature attiva.
+%
+% Per aggiungere un'icona: cercala su fonts.google.com/icons,
+% apri il pannello a destra, copia il valore "Code point" (quattro
+% cifre esadecimali) e aggiungi una riga \ecvicondef.
+%
+% ATTENZIONE alle icone aggiunte tardi a Material (workspace_premium,
+% campaign, diversity_3): un .ttf scaricato qualche anno fa non le
+% contiene e il cerchio resta vuoto senza errori.
+% ----------------------------------------------------------------
+% Due modi di installare il font, provati in quest'ordine.
+%   A) File nella cartella del progetto:
+%        <cartella del .tex>/mi/MaterialIcons-Regular.ttf
+%      Il nome deve essere esattamente questo e la sottocartella
+%      deve chiamarsi "mi". La barra finale in Path= e' obbligatoria.
+%   B) Font installato nel sistema: doppio clic sul .ttf e
+%      "Installa". La famiglia si chiama "Material Icons".
+\IfFileExists{mi/MaterialIcons-Regular.ttf}{%
+  \newfontfamily\miconfont{MaterialIcons-Regular.ttf}[Path=mi/]%
+}{%
+  \IfFontExistsTF{Material Icons}{%
+    \newfontfamily\miconfont{Material Icons}%
+  }{%
+    \newfontfamily\miconfont{\rmdefault}% evita errori a cascata
+    \PackageError{cv}{Font Material Icons non trovato}%
+      {Metti MaterialIcons-Regular.ttf in ./mi/ oppure installalo nel
+       sistema (doppio clic sul file, poi Installa).}%
+  }%
+}
+
+% Tabella nome leggibile -> codepoint.
+\newcommand{\ecvicondef}[2]{\expandafter\gdef\csname ecvmi@#1\endcsname{\symbol{"#2}}}
+
+\ecvicondef{person}{E7FD}            % profile
+\ecvicondef{work}{E8F9}              % work experience
+\ecvicondef{school}{E80C}            % education and training
+\ecvicondef{workspace_premium}{E7AF} % projects and awards
+\ecvicondef{account_balance}{E84F}   % academic representation
+\ecvicondef{translate}{E8E2}         % language skills
+\ecvicondef{memory}{E322}            % digital skills
+\ecvicondef{badge}{EA67}             % certifications
+\ecvicondef{directions_car}{E531}    % driving licence
+\ecvicondef{forum}{E0BF}             % transferable skills
+\ecvicondef{favorite}{E87D}          % interests
+% alternative gia' pronte, se vuoi cambiare metafora:
+\ecvicondef{groups}{F233}            % gruppo di persone
+\ecvicondef{build}{E869}             % attrezzi
+\ecvicondef{gavel}{E90E}             % martelletto, organi collegiali
+\ecvicondef{language}{E894}          % mappamondo
+\ecvicondef{handyman}{F10B}          % attrezzi, variante
+\ecvicondef{commute}{E940}           % spostamenti
+\ecvicondef{emoji_events}{EA23}      % coppa
+\ecvicondef{military_tech}{EA3F}     % medaglia
+
+% \newcommand sta fuori dal condizionale sul file: dentro
+% l'argomento di \IfFileExists il token #1 viene riletto e TeX
+% lancia "Illegal parameter number in definition of \reserved@a".
+\newcommand{\micon}[1]{{\miconfont
+  \ifcsname ecvmi@#1\endcsname
+    \csname ecvmi@#1\endcsname
+  \else
+    \PackageWarning{cv}{Icona '#1' non definita: aggiungi una riga \string\ecvicondef}%
+  \fi}}
+
+\usepackage[hidelinks]{hyperref}
+\usepackage{microtype}
+\usepackage[english]{babel}   % sillabazione inglese
+
+\emergencystretch=2em
+\hyphenpenalty=100
+\tolerance=1200
+
+% ----------------------------------------------------------------
+% COLORI -- palette personale (coerente con cv-template.tex)
+% ----------------------------------------------------------------
+\definecolor{ecvaccent}{HTML}{6A46EC}  % viola: accenti, icone, link, titoli
+\definecolor{ecvdark}{HTML}{000F07}    % nero-verde molto scuro: corpo
+\definecolor{ecvmeta}{HTML}{6B7280}    % grigio: date, luoghi, metadati
+
+\colorlet{ecvblue}{ecvaccent}          % titoli di sezione, icone, link, pallini
+\colorlet{ecvnavy}{ecvaccent}          % nome, sagoma foto
+\colorlet{epwordmark}{ecvmeta}         % scritta "europass"
+\definecolor{euflag}{HTML}{003399}     % blu ufficiale bandiera UE
+\definecolor{eustar}{HTML}{FFCC00}     % giallo ufficiale stelle UE
+
+% ----------------------------------------------------------------
+% FONT (catena di fallback)
+% ----------------------------------------------------------------
+% Ordine: prima i .ttf locali in ./fonts/ (test deterministico),
+% poi il font installato di sistema, infine un ripiego.
+% NB: nel ramo "di sistema" NON va usato UprightFont = *-Regular:
+% quel pattern forza la ricerca per nome di file e fa fallire il
+% caricamento anche quando la famiglia e' regolarmente installata.
+\IfFileExists{fonts/Figtree-Regular.ttf}{%
+  \setmainfont{Figtree}[
+    Path = fonts/, Extension = .ttf,
+    UprightFont = *-Regular, BoldFont = *-Bold,
+    ItalicFont  = *-Italic,  BoldItalicFont = *-BoldItalic,
+    Ligatures = TeX ]
+}{%
+  \IfFontExistsTF{Figtree}{%
+    \setmainfont{Figtree}[Ligatures = TeX]%
+  }{%
+    \PackageWarningNoLine{cv}{Figtree non trovato: scaricalo da fonts.google.com/specimen/Figtree}%
+    \IfFontExistsTF{Open Sans}{\setmainfont{Open Sans}[Ligatures = TeX]}%
+                              {\setmainfont{Carlito}[Ligatures = TeX]}}}
+
+% L'originale Europass e' allineato a sinistra, non giustificato.
+\AtBeginDocument{\setlength{\parindent}{0pt}\frenchspacing\RaggedRight}
+\linespread{1.12}
+
+% ----------------------------------------------------------------
+% MACRO
+% ----------------------------------------------------------------
+
+% Contenuto decorativo: presente in pagina, assente dall'estrazione
+% testo. Serve alle icone, che altrimenti finiscono nel testo
+% copiato come carattere spurio incollato al titolo di sezione, e
+% vengono lette cosi' dagli ATS.
+\newcommand{\ecvnoextract}[1]{\BeginAccSupp{ActualText={}}#1\EndAccSupp{}}
+
+% Icona circolare: cerchio e glifo sono due nodi distinti.
+%
+% Centratura del glifo. I glifi hanno altezza e profondita' diverse
+% fra loro, quindi centrare la loro scatola non basta: va centrato
+% il *disegno*. \ecvglyphcenter misura altezza e profondita' del
+% glifo gia' composto e lo abbassa di (altezza - profondita')/2,
+% portando il suo centro ottico sulla linea di base. Il nodo viene
+% poi ancorato con "base" al centro del cerchio, quindi il centro
+% ottico coincide col centro del cerchio per qualunque icona, a
+% qualunque corpo.
+%
+% Regolazioni rapide:
+%   \ecvIconSize   diametro del cerchio
+%   \ecvIconGlyph  corpo del glifo (tenerlo intorno al 50% del
+%                  diametro: sopra il 60% il segno tocca il bordo)
+%   \ecvIconRise   quanto il cerchio sale sopra la linea di base
+\newcommand{\ecvIconSize}{13pt}
+\newcommand{\ecvIconGlyph}{6.4}
+\newcommand{\ecvIconRise}{-0.72ex}
+
+\newcommand{\ecvglyphcenter}[1]{\raisebox{\dimexpr(\depth-\height)/2\relax}{#1}}
+
+\newcommand{\ecvicon}[1]{%
+  \begin{tikzpicture}[baseline=\ecvIconRise]
+    \node[circle,fill=ecvblue,minimum size=\ecvIconSize,inner sep=0pt] (ecvic) {};
+    \node[anchor=base,inner sep=0pt,outer sep=0pt,text=white,
+          font=\fontsize{\ecvIconGlyph}{\ecvIconGlyph}\selectfont]
+      at (ecvic.center) {\ecvnoextract{\ecvglyphcenter{#1}}};
+  \end{tikzpicture}%
+}
+
+% Sagoma viola con foto ritagliata in cerchio.
+%
+%   \ecvphoto{foto.jpg}        inquadratura piena (nessun ingrandimento)
+%   \ecvphoto[1.25]{foto.jpg}  ingrandisce la foto del 25%
+%
+% Lo spessore dell'anello colorato e' la differenza fra il raggio
+% della sagoma (\ecvBlobScale) e \ecvPhotoR. Alzare \ecvPhotoR o
+% abbassare \ecvBlobScale assottiglia l'anello: sotto i ~0,12 cm
+% di margine minimo la foto rischia di sbordare dalla sagoma.
+% Metti \ecvBlobDebugtrue per sovrapporre alla sagoma il cerchio
+% del ritaglio e i dodici punti di controllo.
+\newif\ifecvBlobDebug \ecvBlobDebugfalse
+
+\newcommand{\ecvBlobScale}{1.00}  % dimensione della sagoma colorata
+\newcommand{\ecvPhotoR}{1.42}     % raggio del ritaglio della foto, in cm
+\newcommand{\ecvPhotoDx}{0.05}    % spostamento orizzontale, in cm
+\newcommand{\ecvPhotoDy}{0.16}    % spostamento verticale, in cm
+
+% Il profilo e' definito da dodici raggi misurati DAL CENTRO DELLA
+% FOTO, non dall'origine della figura. Il \makebox[\linewidth][c]
+% centra il disegno nella colonna: senza, la scatola si appoggia al
+% margine sinistro e lascia tutto lo spazio residuo a destra.
+\NewDocumentCommand{\ecvphoto}{O{1.0} m}{%
+  \pgfmathsetlengthmacro{\ecvPhotoW}{#1*2*\ecvPhotoR cm}%
+  \par\noindent\makebox[\linewidth][c]{%
+    \begin{tikzpicture}
+      \fill[ecvnavy,shift={(\ecvPhotoDx,\ecvPhotoDy)},scale=\ecvBlobScale]
+      plot[smooth cycle,tension=0.78] coordinates
+      {(1.600,0.000) (1.524,0.880) (0.970,1.680) (0.000,1.820)
+       (-0.830,1.438) (-1.386,0.800) (-1.620,0.000) (-1.377,-0.795)
+       (-0.790,-1.368) (0.000,-1.630) (0.870,-1.507) (1.412,-0.815)};
+      \IfFileExists{#2}{%
+        \begin{scope}
+          \clip (\ecvPhotoDx,\ecvPhotoDy) circle (\ecvPhotoR);
+          \node at (\ecvPhotoDx,\ecvPhotoDy) {\includegraphics[width=\ecvPhotoW]{#2}};
+        \end{scope}}{}%
+      \ifecvBlobDebug
+        \begin{scope}[shift={(\ecvPhotoDx,\ecvPhotoDy)}]
+          \draw[red,thick] (0,0) circle (\ecvPhotoR);
+          \foreach \rr in {1.6,1.8,2.0}{\draw[gray!50,dashed] (0,0) circle (\rr);}
+          \foreach \a/\rr in {0/1.60,30/1.76,60/1.94,90/1.82,120/1.66,150/1.60,
+                              180/1.62,210/1.59,240/1.58,270/1.63,300/1.74,330/1.63}{%
+            \fill[red] (\a:\rr) circle (0.04);
+            \node[red,font=\tiny,inner sep=1pt] at (\a:\rr+0.22) {\a};}
+        \end{scope}
+      \fi
+    \end{tikzpicture}}\par
+}
+
+% Link.
+% \ecvlinkplain e' il default: il colore basta a segnalare il link,
+% e la sottolineatura di \ecvlink cade a 1,2pt sotto la linea di
+% base, cioe' proprio sul tratto dell'underscore, rendendolo
+% invisibile negli URL che lo contengono.
+\newcommand{\ecvlinkplain}[2]{\href{#1}{\textcolor{ecvblue}{#2}}}
+\newcommand{\ecvlink}[2]{\href{#1}{\textcolor{ecvblue}{\setul{1.2pt}{.4pt}\ul{\mbox{#2}}}}}
+\newcommand{\ecvsep}{\,\textcolor{ecvblue}{\textbar}\,}
+
+% Titoli di sezione
+\newcommand{\ecvsectionmain}[2]{%
+  \par\vspace{11pt}
+  {\hyphenpenalty=10000\exhyphenpenalty=10000
+   \fontsize{12}{14}\selectfont\bfseries
+   \ecvicon{#1}\hspace{5pt}%
+   \textcolor{ecvblue}{#2}\par}%
+  \vspace{5pt}
+}
+\newcommand{\ecvsectionside}[2]{%
+  \par\vspace{12pt}
+  {\hyphenpenalty=10000\exhyphenpenalty=10000
+   \fontsize{11}{13.5}\selectfont\bfseries
+   \ecvicon{#1}\hspace{5pt}%
+   \textcolor{ecvblue}{#2}\par}%
+  \vspace{4pt}
+}
+
+\newcommand{\ecventry}[2]{%
+  \par\vspace{9pt}
+  \noindent\begin{minipage}{\linewidth}
+    \textcolor{ecvdark}{\fontsize{10.5}{12.5}\selectfont\bfseries #1}%
+    \hfill{\small\color{ecvmeta} #2}
+  \end{minipage}\par\vspace{1pt}
+}
+
+\newcommand{\ecvorg}[1]{{\small\color{ecvmeta} #1}\par\vspace{3pt}}
+\newcommand{\ecvdesc}[1]{{\setlength{\parindent}{0pt}\small\color{ecvdark}\noindent #1\par}}
+
+% Voce indivisibile fra pagine.
+%   \ecvblock{\ecventry{...}{...}\ecvorg{...}\ecvdesc{...}}
+% Una minipage e' per definizione non spezzabile: se non entra
+% nello spazio residuo passa intera alla pagina successiva.
+% Il \vspace{-9pt} interno compensa quello che \ecventry aggiunge
+% in testa, che dentro la minipage non collassa col contesto.
+\newcommand{\ecvblock}[1]{%
+  \par\vspace{9pt}\noindent
+  \begin{minipage}{\linewidth}\vspace{-9pt}#1\end{minipage}\par
+}
+
+% Elenchi.
+% Sillabazione disattivata: a 29% di larghezza la colonna spezzava
+% parole dentro le intestazioni in grassetto.
+\newenvironment{ecvlistside}
+  {\begin{itemize}[leftmargin=9pt,topsep=1pt,itemsep=1pt,parsep=0pt,
+                   label=\textcolor{ecvblue}{\textbullet}]%
+   \small\color{ecvdark}\hyphenpenalty=10000\exhyphenpenalty=10000}
+  {\end{itemize}}
+\newenvironment{ecvsublistside}
+  {\begin{itemize}[leftmargin=9pt,topsep=1pt,itemsep=1pt,parsep=0pt,
+                   label=\textcolor{ecvblue}{\textbullet}]%
+   \small\color{ecvdark}\hyphenpenalty=10000\exhyphenpenalty=10000}
+  {\end{itemize}}
+\newenvironment{ecvlist}
+  {\begin{itemize}[leftmargin=11pt,topsep=2pt,itemsep=2pt,parsep=0pt,
+                   label=\textcolor{ecvblue}{\textbullet}]\small\color{ecvdark}}
+  {\end{itemize}}
+
+\newcommand{\ecvlabel}[1]{\par\vspace{4pt}{\small\color{ecvdark} #1}\par\vspace{1pt}}
+
+% ----------------------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0pt}
+\fancyfoot[R]{\footnotesize\color{ecvmeta} Page \thepage\ / \pageref{LastPage}}
+
+\columnratio{0.29}
+\setlength{\columnsep}{16pt}
+
+\begin{document}
+
+% ----------------------------------------------------------------
+% LOGO EUROPASS -- bandiera UE + wordmark grigio.
+% Se metti "europass-logo.png" nella cartella viene usato il file
+% ufficiale (consigliato). Altrimenti la bandiera viene disegnata
+% secondo le proporzioni ufficiali: rapporto 3:2, fondo #003399,
+% 12 stelle #FFCC00 a cinque punte con una punta verso l'alto,
+% disposte su una circonferenza di raggio pari a 1/3 dell'altezza,
+% ciascuna inscritta in un cerchio di diametro 1/9 dell'altezza.
+% ----------------------------------------------------------------
+\noindent\hfill
+\IfFileExists{europass-logo.png}{%
+  \includegraphics[height=0.92cm]{europass-logo.png}%
+}{%
+  \raisebox{-2pt}{\begin{tikzpicture}[baseline]
+    \pgfmathsetlengthmacro{\euh}{0.62cm}          % altezza bandiera
+    \fill[euflag] (0,0) rectangle (1.5*\euh,\euh);
+    \begin{scope}[shift={(0.75*\euh,0.5*\euh)}]
+      \foreach \a in {90,120,...,420}{%
+        \node[star,star points=5,star point ratio=2.35,
+              fill=eustar,draw=none,inner sep=0pt,
+              minimum size=\euh/9] at (\a:\euh/3) {};}
+    \end{scope}
+  \end{tikzpicture}}\hspace{5pt}%
+  {\fontsize{20}{20}\selectfont\bfseries\color{epwordmark}europass}%
+}
+\par\vspace{-0.45cm}
+
+\begin{paracol}{2}
+
+% ================================================================
+% LEFT COLUMN
+% ================================================================
+
+% foto.jpg nella stessa cartella: viene ritagliata da sola.
+% Senza file resta la sagoma colorata vuota.
+\ecvphoto{foto.jpg}
+
+\ecvsectionside{\micon{translate}}{Language skills}
+\begin{ecvlistside}
+  \item \textbf{[Language]}: native speaker
+  \item \textbf{[Language]}: [CEFR level, e.g. B2]
+\end{ecvlistside}
+
+\ecvsectionside{\micon{memory}}{Digital skills}
+\begin{ecvlistside}
+  \item \textbf{[Skill group]}
+  \begin{ecvsublistside}
+    \item {}[Tool, tool]
+    \item {}[Tool, tool]
+  \end{ecvsublistside}
+  \item \textbf{[Skill group]}
+  \begin{ecvsublistside}
+    \item {}[Tool, tool]
+    \item {}[Tool, tool]
+  \end{ecvsublistside}
+  \item \textbf{[Skill group]}
+  \begin{ecvsublistside}
+    \item {}[Language, language]
+    \item {}[Framework, framework]
+  \end{ecvsublistside}
+\end{ecvlistside}
+
+\ecvsectionside{\micon{badge}}{Certifications}
+\begin{ecvlistside}
+  \item {}[Certification (year)]
+  \item {}[Certification]
+  \item {}[Certification, issuer (in progress)]
+\end{ecvlistside}
+
+\vspace*{\fill}\newpage
+
+\ecvsectionside{\micon{forum}}{Transferable skills}
+\begin{ecvlistside}
+  \item {}[Skill, stated as what you did]
+  \item {}[Skill, stated as what you did]
+  \item {}[Skill, stated as what you did]
+\end{ecvlistside}
+
+\ecvsectionside{\micon{directions_car}}{Driving licence}
+\begin{ecvlistside}
+  \item {}[Categories]
+\end{ecvlistside}
+
+\ecvsectionside{\micon{favorite}}{Interests}
+\begin{ecvlistside}
+  \item {}[Interest, interest]
+  \item {}[Interest]
+\end{ecvlistside}
+
+\switchcolumn
+
+\vspace*{6pt}
+
+{\fontsize{21}{24}\selectfont\bfseries\color{ecvnavy}[Name Surname]\par}
+
+\vspace{7pt}
+{\small\color{ecvdark}\raggedright
+  [City (Country)]\ecvsep{}%
+  Date of birth: [DD/MM/YYYY]\ecvsep{}%
+  Nationality: [Nationality]\par
+  \vspace{2.5pt}
+  Mobile: \mbox{+00~000~000~0000}\ecvsep{}%
+  \ecvlinkplain{mailto:name.surname@example.com}{name.surname@example.com}\par
+  \vspace{2.5pt}
+  \ecvlinkplain{https://www.linkedin.com/in/username}{linkedin.com/in/username}\par}
+
+\ecvsectionmain{\micon{person}}{Profile}
+\ecvdesc{[Three or four plain sentences. Open with context, not a title.
+  Every fact comes from cv.md, article-digest.md or the offer's report:
+  what you did, where, for how long, with which result.]\par\vspace{3pt}
+  [Optional second paragraph: current studies, awards.]}
+
+\ecvsectionmain{\micon{work}}{Work experience}
+
+\ecvblock{%
+\ecventry{[Job title]}{[DD/MM/YYYY] -- [DD/MM/YYYY]}
+\ecvorg{[Employer] \textbar{} [City, Country]}
+\ecvdesc{[What you did and with what result, in two to four sentences.
+  Numbers only if they are in cv.md.]}}
+
+\ecvblock{%
+\ecventry{[Job title]}{[DD/MM/YYYY] -- [DD/MM/YYYY]}
+\ecvorg{[Employer] \textbar{} [City, Country]}
+\ecvdesc{[What you did and with what result.]}}
+
+\ecvsectionmain{\micon{school}}{Education and training}
+
+\ecvblock{%
+\ecventry{[Degree]}{[MM/YYYY] -- [MM/YYYY or in progress]}
+\ecvorg{[Institution] \textbar{} [City, Country]}}
+
+\ecvblock{%
+\ecventry{[Degree]}{[YYYY] -- [YYYY]}
+\ecvorg{[Institution] \textbar{} [City, Country]}
+\ecvdesc{[Final grade, qualification.]}}
+
+\ecvsectionmain{\micon{workspace_premium}}{Projects and awards}
+
+\ecvblock{%
+\ecventry{[Project name]}{[YYYY]}
+\ecvorg{[Award, if any] \textbar{}
+  \ecvlinkplain{https://github.com/username/project}{github.com/username/project}}
+\ecvdesc{[What it does, one or two sentences. State if it runs locally
+  and is not in production.]}}
+
+\ecvblock{%
+\ecventry{[Project name]}{[YYYY]}
+\ecvorg{[Short description] \textbar{}
+  \ecvlinkplain{https://github.com/username/project}{github.com/username/project}}
+\ecvdesc{[What it does.]}}
+
+\ecvsectionmain{\micon{account_balance}}{[Other activities]}
+
+\ecvblock{%
+\ecventry{[Role]}{[MM/YYYY] -- [MM/YYYY]}
+\ecvorg{[Organisation]}
+\ecvdesc{[One sentence.]}}
+
+\vspace{11pt}
+{\footnotesize\color{ecvmeta} I authorise the processing of the personal data contained in this CV pursuant to Regulation (EU) 2016/679 (GDPR).}
+
+\end{paracol}
+\end{document}

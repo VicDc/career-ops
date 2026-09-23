@@ -90,5 +90,5 @@ Same as `modes/latex.md` and `modes/pdf.md`:
 
 | Mode | Input | Output |
 |------|-------|--------|
-| `latex` | `cv.md` | career-ops `templates/cv-template.tex` → `.tex` + PDF |
+| `latex` | `cv.md` | career-ops `templates-fork/cv-template.tex` → `.tex` + PDF |
 | `latex-tex` | user's `resume.tex` | same template shape, tailored prose only → `.tex` + PDF |

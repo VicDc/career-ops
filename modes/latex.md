@@ -14,7 +14,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 8. Select top 3-4 most relevant projects for the offer
 9. Reorder experience bullets by JD relevance
 10. Inject keywords naturally into existing achievements
-11. Generate the `.tex` file using `templates/cv-template.tex`
+11. Generate the `.tex` file using `templates-fork/cv-template.tex` (the fork template; `templates/cv-template.tex` stays the upstream base used by `build-cv-latex.mjs`)
 12. Derive the output location from the report (`--report=<path>` — the same file read for `{{SUMMARY}}`):
     - Parse the report's H1 line, format `# Evaluation: {Company} — {Role}`. Split once on the first occurrence of ` — `; if the em dash is absent, fall back to ` -- ` (see `reports/030-capgemini-agentic-ai-expert-2026-07-02.md`). Text before the separator is `{company_raw}`, text after is `{role_raw}`.
     - **Slugify procedure** (used for every slug below, in this order): drop parenthetical content (`(Barcelona)`, `(m/f/d)`, `(Remote)`) → lowercase → convert source `/` and `-` to spaces → strip remaining non-alphanumeric characters, keeping spaces → collapse repeated spaces → convert spaces to hyphens → collapse repeated hyphens.
@@ -32,7 +32,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
 
 ## Template Placeholders
 
-The template at `templates/cv-template.tex` uses `{{PLACEHOLDER}}` syntax:
+The template at `templates-fork/cv-template.tex` uses `{{PLACEHOLDER}}` syntax:
 
 | Placeholder | Source |
 |-------------|--------|

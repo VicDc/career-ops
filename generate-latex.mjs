@@ -17,7 +17,7 @@
  *           or pdflatex (MiKTeX / TeX Live) on PATH.
  */
 
-import { readFile, writeFile, stat, copyFile, rm, readdir } from 'fs/promises';
+import { readFile, writeFile, stat, copyFile, rm } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
@@ -63,7 +63,7 @@ function firstParagraph(body) {
   return null;
 }
 
-// Source chain: explicit --report > most recent reports/*.md > cv.md.
+// Source chain: explicit --report > cv.md.
 async function extractTailoredSummary({ scriptDir, reportFlag }) {
   if (reportFlag) {
     try {
@@ -75,22 +75,8 @@ async function extractTailoredSummary({ scriptDir, reportFlag }) {
     } catch { /* fall through */ }
   }
 
-  const reportsDir = resolve(scriptDir, 'reports');
-  try {
-    const names = (await readdir(reportsDir)).filter(f => f.endsWith('.md'));
-    const withMtime = await Promise.all(names.map(async f => {
-      const p = resolve(reportsDir, f);
-      return { path: p, name: f, mtime: (await stat(p)).mtimeMs };
-    }));
-    withMtime.sort((a, b) => b.mtime - a.mtime);
-    for (const r of withMtime) {
-      const md = await readFile(r.path, 'utf-8');
-      const body = extractMarkdownSection(md, /^##\s+Tailored CV Summary\s*$/m);
-      const text = firstParagraph(body);
-      if (text) return { text, source: `report:auto:${r.name}` };
-    }
-  } catch { /* fall through */ }
-
+  // No --report: use cv.md. Guessing "the most recent report" put another
+  // offer's summary (in another language) into the CV.
   try {
     const md = await readFile(resolve(scriptDir, 'cv.md'), 'utf-8');
     const body = extractMarkdownSection(md, /^##\s+Summary\s*$/m);
@@ -298,16 +284,7 @@ async function loadReportForSelection({ scriptDir, reportFlag }) {
   if (reportFlag) {
     try { return await readFile(resolve(reportFlag), 'utf-8'); } catch { /* fall through */ }
   }
-  const reportsDir = resolve(scriptDir, 'reports');
-  try {
-    const names = (await readdir(reportsDir)).filter(f => f.endsWith('.md'));
-    const withMtime = await Promise.all(names.map(async f => {
-      const p = resolve(reportsDir, f);
-      return { path: p, mtime: (await stat(p)).mtimeMs };
-    }));
-    withMtime.sort((a, b) => b.mtime - a.mtime);
-    if (withMtime[0]) return await readFile(withMtime[0].path, 'utf-8');
-  } catch { /* no reports/ */ }
+  // No --report: keep cv.md order rather than another offer's selection.
   return null;
 }
 
@@ -404,6 +381,13 @@ function extractProjects(md) {
   }
   return entries;
 }
+
+// Length caps. Bullets are taken in cv.md order, so the order there is the
+// priority: put the strongest bullet first. The report decides WHICH entries
+// and in what order; these caps decide HOW MUCH of each one is printed.
+const MAX_PROJECTS = 3;
+const MAX_PROJECT_BULLETS = 2;     // after the one-line description
+const MAX_EXPERIENCE_BULLETS = 3;
 
 function formatProjectsLatex(entries) {
   if (!entries.length) return '';
@@ -555,6 +539,12 @@ async function main() {
     process.exit(1);
   }
 
+  // A mistyped --report must fail, not silently fall back to cv.md.
+  if (reportFlag && !existsSync(resolve(reportFlag))) {
+    console.error(`Report not found: ${reportFlag}`);
+    process.exit(1);
+  }
+
   const absPath = resolve(inputPath);
   let content;
   try {
@@ -566,7 +556,7 @@ async function main() {
 
   // --- {{SUMMARY}} substitution (pre-validation) ---
   // Runs only if the .tex still contains the placeholder. Source chain:
-  //   --report=<path> > most recent reports/*.md with "## Tailored CV Summary" > cv.md "## Summary"
+  //   --report=<path> ("## Tailored CV Summary") > cv.md "## Summary"
   // Mutates the input .tex in place so xelatex consumes the resolved file.
   let summarySource = null;
   if (content.includes('{{SUMMARY}}')) {
@@ -575,7 +565,7 @@ async function main() {
       reportFlag,
     });
     if (summary) {
-      content = content.replace(/\{\{SUMMARY\}\}/g, escapeLatex(summary.text));
+      content = content.replace(/\{\{SUMMARY\}\}/g, () => escapeLatex(summary.text));
       // template intentionally NOT mutated; final content is compiled from a working copy (see below)
       summarySource = summary.source;
     }
@@ -595,7 +585,7 @@ async function main() {
       certificationsSource = 'cv.md:missing';
     }
     const rendered = formatCertificationsLatex(certs);
-    content = content.replace(/\{\{CERTIFICATIONS\}\}/g, rendered);
+    content = content.replace(/\{\{CERTIFICATIONS\}\}/g, () => rendered);
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
 
@@ -609,7 +599,7 @@ async function main() {
       const yml = await readFile(resolve(DATA_ROOT, 'config/profile.yml'), 'utf-8');
       const line = parseContactLine(yml);
       if (line) {
-        content = content.replace(/\{\{CONTACT_LINE\}\}/g, line);
+        content = content.replace(/\{\{CONTACT_LINE\}\}/g, () => line);
         // template intentionally NOT mutated; final content is compiled from a working copy (see below)
         contactLineSource = 'profile.yml';
       } else {
@@ -641,18 +631,18 @@ async function main() {
       else if (present > 0) headerSource = 'profile.yml:partial';
       else headerSource = 'profile.yml:missing';
 
-      if (id.name) content = content.replace(/\{\{NAME\}\}/g, escapeLatex(id.name));
+      if (id.name) content = content.replace(/\{\{NAME\}\}/g, () => escapeLatex(id.name));
       if (id.email) {
-        content = content.replace(/\{\{EMAIL_URL\}\}/g, id.email);
-        content = content.replace(/\{\{EMAIL_DISPLAY\}\}/g, escapeLatex(id.email));
+        content = content.replace(/\{\{EMAIL_URL\}\}/g, () => id.email);
+        content = content.replace(/\{\{EMAIL_DISPLAY\}\}/g, () => escapeLatex(id.email));
       }
       if (id.linkedin) {
-        content = content.replace(/\{\{LINKEDIN_URL\}\}/g, id.linkedin);
-        content = content.replace(/\{\{LINKEDIN_DISPLAY\}\}/g, escapeLatex(urlToDisplay(id.linkedin)));
+        content = content.replace(/\{\{LINKEDIN_URL\}\}/g, () => id.linkedin);
+        content = content.replace(/\{\{LINKEDIN_DISPLAY\}\}/g, () => escapeLatex(urlToDisplay(id.linkedin)));
       }
       if (id.github) {
-        content = content.replace(/\{\{GITHUB_URL\}\}/g, id.github);
-        content = content.replace(/\{\{GITHUB_DISPLAY\}\}/g, escapeLatex(urlToDisplay(id.github)));
+        content = content.replace(/\{\{GITHUB_URL\}\}/g, () => id.github);
+        content = content.replace(/\{\{GITHUB_DISPLAY\}\}/g, () => escapeLatex(urlToDisplay(id.github)));
       }
       // template intentionally NOT mutated; final content is compiled from a working copy (see below)
     } catch {
@@ -666,11 +656,11 @@ async function main() {
     try {
       const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const skills = extractSkills(md);
-      content = content.replace(/\{\{SKILLS\}\}/g, formatSkillsLatex(skills));
+      content = content.replace(/\{\{SKILLS\}\}/g, () => formatSkillsLatex(skills));
       skillsSource = skills.length ? `cv.md:${skills.length}` : 'cv.md:empty';
     } catch {
       skillsSource = 'cv.md:missing';
-      content = content.replace(/\{\{SKILLS\}\}/g, '');
+      content = content.replace(/\{\{SKILLS\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
@@ -681,17 +671,17 @@ async function main() {
     try {
       const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const entries = extractEducation(md);
-      content = content.replace(/\{\{EDUCATION\}\}/g, formatEducationLatex(entries));
+      content = content.replace(/\{\{EDUCATION\}\}/g, () => formatEducationLatex(entries));
       educationSource = entries.length ? `cv.md:${entries.length}` : 'cv.md:empty';
     } catch {
       educationSource = 'cv.md:missing';
-      content = content.replace(/\{\{EDUCATION\}\}/g, '');
+      content = content.replace(/\{\{EDUCATION\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
 
   // --- Relevance Selection: load once, shared between EXPERIENCE and PROJECTS ---
-  // Same report resolution chain as SUMMARY: explicit --report > most recent.
+  // Same source as SUMMARY: explicit --report only.
   let relevanceSelection = { experience: [], projects: [] };
   if (content.includes('{{EXPERIENCE}}') || content.includes('{{PROJECTS}}')) {
     const reportMd = await loadReportForSelection({ scriptDir: DATA_ROOT, reportFlag });
@@ -706,14 +696,14 @@ async function main() {
       const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const all = extractExperience(md);
       experienceSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
-      const { ordered, info } = applySelection(all, relevanceSelection.experience, e => e.company);
+      const { ordered, info } = applySelection(all, relevanceSelection.experience, e => `${e.company} ${e.role}`);
       if (relevanceSelection.experience.length) {
         experienceSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{EXPERIENCE\}\}/g, formatExperienceLatex(ordered));
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => formatExperienceLatex(ordered.map(e => ({ ...e, bullets: e.bullets.slice(0, MAX_EXPERIENCE_BULLETS) }))));
     } catch {
       experienceSource = 'cv.md:missing';
-      content = content.replace(/\{\{EXPERIENCE\}\}/g, '');
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
@@ -730,10 +720,10 @@ async function main() {
       if (relevanceSelection.projects.length) {
         projectsSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{PROJECTS\}\}/g, formatProjectsLatex(ordered));
+      content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => ({ ...p, metaBullets: p.metaBullets.slice(0, MAX_PROJECT_BULLETS) }))));
     } catch {
       projectsSource = 'cv.md:missing';
-      content = content.replace(/\{\{PROJECTS\}\}/g, '');
+      content = content.replace(/\{\{PROJECTS\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }

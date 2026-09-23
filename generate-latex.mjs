@@ -211,7 +211,7 @@ function normalizeForMatch(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function extractRelevanceSelection(md) {
+export function extractRelevanceSelection(md) {
   const result = { experience: [], projects: [] };
   if (!md) return result;
   const rsBody = extractMarkdownSection(md, /^##\s+Relevance Selection.*$/m);
@@ -226,7 +226,10 @@ function extractRelevanceSelection(md) {
     const entries = [];
     for (const line of subBody.split('\n')) {
       const lm = line.match(/^\s*\d+\.\s+(.+?)\s+\((primary|secondary|excluded)\)/);
-      if (lm) entries.push({ name: lm[1].trim(), tag: lm[2], order: entries.length });
+      if (lm) { entries.push({ name: lm[1].trim(), tag: lm[2], order: entries.length }); continue; }
+      // Optional, indented under an entry: "   bullets: Scope | Design decisions"
+      const bl = line.match(/^\s+bullets:\s*(.+?)\s*$/i);
+      if (bl && entries.length) entries[entries.length - 1].bullets = bl[1].split('|').map(b => b.trim()).filter(Boolean);
     }
     return entries;
   };
@@ -261,7 +264,7 @@ function applySelection(cvEntries, selectionList, getName) {
     if (sel.tag === 'excluded') {
       excludedSet.add(entry);
     } else if (!matched.has(entry)) {
-      ordered.push(entry);
+      ordered.push(sel.bullets ? { ...entry, pick: sel.bullets } : entry);
       matched.add(entry);
     }
   }
@@ -277,6 +280,24 @@ function applySelection(cvEntries, selectionList, getName) {
   }
 
   return { ordered, info: { selected: selectedCount, fallback } };
+}
+
+// Bullets the report picked for one entry, in the report's order. A selector
+// matches the start of the bullet text (projects: its bold key), ignoring case
+// and punctuation. No selectors: the first `max` in cv.md order. A selector
+// that matches nothing is an issue, so a typo in the report stops the build
+// instead of silently dropping a bullet.
+export function pickBullets(items, selectors, textOf, max, label, issues) {
+  if (!selectors || !selectors.length) return items.slice(0, max);
+  const picked = [];
+  for (const sel of selectors) {
+    const want = normalizeForMatch(sel);
+    const hit = items.find(i => !picked.includes(i) && normalizeForMatch(textOf(i)).startsWith(want));
+    if (hit) picked.push(hit);
+    else issues.push(`Relevance Selection: bullet "${sel}" not found in "${label}"`);
+  }
+  if (picked.length > max) issues.push(`Relevance Selection: "${label}" picks ${picked.length} bullets, max ${max}`);
+  return picked.slice(0, max);
 }
 
 // Load report markdown for selection parsing: explicit --report > auto-detect most recent.
@@ -683,6 +704,7 @@ async function main() {
   // --- Relevance Selection: load once, shared between EXPERIENCE and PROJECTS ---
   // Same source as SUMMARY: explicit --report only.
   let relevanceSelection = { experience: [], projects: [] };
+  const selectionIssues = [];
   if (content.includes('{{EXPERIENCE}}') || content.includes('{{PROJECTS}}')) {
     const reportMd = await loadReportForSelection({ scriptDir: DATA_ROOT, reportFlag });
     if (reportMd) relevanceSelection = extractRelevanceSelection(reportMd);
@@ -700,7 +722,7 @@ async function main() {
       if (relevanceSelection.experience.length) {
         experienceSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => formatExperienceLatex(ordered.map(e => ({ ...e, bullets: e.bullets.slice(0, MAX_EXPERIENCE_BULLETS) }))));
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => formatExperienceLatex(ordered.map(e => ({ ...e, bullets: pickBullets(e.bullets, e.pick, b => b, MAX_EXPERIENCE_BULLETS, e.role, selectionIssues) }))));
     } catch {
       experienceSource = 'cv.md:missing';
       content = content.replace(/\{\{EXPERIENCE\}\}/g, () => '');
@@ -720,7 +742,7 @@ async function main() {
       if (relevanceSelection.projects.length) {
         projectsSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => ({ ...p, metaBullets: p.metaBullets.slice(0, MAX_PROJECT_BULLETS) }))));
+      content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => ({ ...p, metaBullets: pickBullets(p.metaBullets, p.pick, mb => mb.key, MAX_PROJECT_BULLETS, p.name, selectionIssues) }))));
     } catch {
       projectsSource = 'cv.md:missing';
       content = content.replace(/\{\{PROJECTS\}\}/g, () => '');
@@ -731,6 +753,7 @@ async function main() {
   // Engine first: the CJK check depends on it.
   const engine = resolveLatexEngine();
   const { issues, counts } = validateLatexContent(content, compileOnly, engine);
+  issues.push(...selectionIssues);
 
   const fileInfo = await stat(absPath);
   const sizeKB = (fileInfo.size / 1024).toFixed(1);

@@ -651,11 +651,15 @@ Ordered list of which Experience and Projects to include in the CV generated for
 ```markdown
 ### Experience
 1. Company Name (primary) - short rationale (why this experience is relevant to the role)
+   bullets: Cut onboarding time | Led the migration | Trained support staff
 2. Company Name (secondary) - rationale
+   bullets: Built the reporting | Owned the vendor relationship
 3. Company Name (excluded) - rationale (why off-topic)
 ### Projects
 1. Project Name (primary) - rationale
+   bullets: Evaluation | Architecture
 2. Project Name (secondary) - rationale
+   bullets: Key decisions | Observability
 3. Project Name (excluded) - rationale
 ```
 
@@ -669,6 +673,19 @@ Ordered list of which Experience and Projects to include in the CV generated for
 - Project name matches on the name before the em-dash (e.g. "Project Atlas" matches the project with its descriptor)
 - If a cv.md entry is NOT mentioned here, it is included as a tail fallback (safety net)
 - Order of primary+secondary entries = emission order in the CV
+- Experience also matches on the role title, so an exclusion may name either the company or the role
+
+**Length (fixed by `generate-latex.mjs`, the CV stays at 2 pages):**
+- At most **3 projects**: the first 3 primary/secondary entries. Tag any others `(excluded)` with a reason, rather than listing them to be cut silently.
+- Per project: the one-line description, always printed, plus at most **2 bullets**.
+- Per experience: at most **3 bullets**.
+
+**Bullet choice (`bullets:` line, optional but expected for every included entry):**
+- One indented line under the entry: `bullets:` followed by selectors separated by ` | `. The order you write them in is the order printed.
+- Pick the bullets that answer THIS JD's requirements: the evidence named in Block B, not the most impressive ones in general.
+- A selector is the **start** of the bullet as written in `cv.md`: for projects, its bold key (`Evaluation`, `Architecture`); for experience, the first words of the bullet (`Cut onboarding time`). Case and punctuation are ignored. Copy the words from `cv.md`, never paraphrase them: bullets are printed verbatim from `cv.md`, the selector only points at one.
+- A selector that matches nothing, or more bullets than the limit, stops the CV build with an error naming it.
+- No `bullets:` line: the first bullets in `cv.md` order are used.
 
 ---
 

@@ -22,9 +22,10 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
     - `{candidate_slug}` = the same slugify procedure applied to `config/profile.yml → candidate.name`.
     - `{report_num}` = leading numeric prefix of the report filename (`reports/{report_num}-….md`).
     - `{out_dir}` = `output/{report_num}-{company_slug}-{role_slug}/`. Create it if it does not exist.
-    - `{timestamp}` = current time as `YYYYMMDD-HHMM`.
-    Write the `.tex` to `{out_dir}/cv-{candidate_slug}-{timestamp}.tex`. The filename carries no company, role, or offer reference — the directory does.
-13. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{timestamp}.tex {out_dir}/cv-{candidate_slug}-{timestamp}.pdf`
+    - `{date}` = current date as `YYYY-MM-DD`.
+    - `{stamp}` = `{date}`, or `{date}-{HHMM}` (current time, 24h) when `{out_dir}/cv-{candidate_slug}-{date}.tex` or `.pdf` already exists — never overwrite an earlier run. The `.tex` and the `.pdf` always share the same `{stamp}`.
+    Write the `.tex` to `{out_dir}/cv-{candidate_slug}-{stamp}.tex`. The filename carries no company, role, or offer reference — the directory does.
+13. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{stamp}.tex {out_dir}/cv-{candidate_slug}-{stamp}.pdf`
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
 **Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.

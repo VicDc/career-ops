@@ -424,11 +424,14 @@ function formatProjectsLatex(entries) {
     .join('\n\n');
 }
 
+// Each entry is an alternation so a CV written in a language other than English
+// still validates: the check is that the ATS sections exist, not that their
+// headings are English. Add a language by extending the alternations.
 const REQUIRED_SECTIONS = [
-  '\\\\section{Education}',
-  '\\\\section{Experience}',
-  '\\\\section{Projects}',
-  '\\\\section{Technical Skills}',
+  '\\\\section{(Education|Formazione)}',
+  '\\\\section{(Experience|Esperienza)}',
+  '\\\\section{(Projects|Progetti)}',
+  '\\\\section{(Technical Skills|Competenze Tecniche)}',
 ];
 
 const REQUIRED_COMMANDS = [

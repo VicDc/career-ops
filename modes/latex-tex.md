@@ -60,11 +60,12 @@ latex:
     - Slugify `{company_raw}` → `{company_slug}` and `{role_raw}` → `{role_slug}`. Cap `{role_slug}` at 5 words after slugifying (truncate, never pad). Do not cap `{company_slug}`.
     - `{candidate_slug}` = the same slugify procedure applied to `config/profile.yml → candidate.name`.
     - `{report_num}` = leading numeric prefix of the report filename (`reports/{report_num}-….md`).
-    - `{timestamp}` = current time as `YYYYMMDD-HHMM`.
-    - `{out_dir}` = `output/{report_num}-{company_slug}-{role_slug}/`. **Fallback:** step 4 does not guarantee a report — if no report path resolves, or the file has no H1 in the expected format, set `{out_dir}` = `output/adhoc-{timestamp}/` and stop there. Do not attempt to derive company or role from the JD, the tracker, or any other source.
+    - `{date}` = current date as `YYYY-MM-DD`.
+    - `{stamp}` = `{date}`, or `{date}-{HHMM}` (current time, 24h) when `{out_dir}/cv-{candidate_slug}-{date}.tex` or `.pdf` already exists — never overwrite an earlier run. The `.tex` and the `.pdf` always share the same `{stamp}`.
+    - `{out_dir}` = `output/{report_num}-{company_slug}-{role_slug}/`. **Fallback:** step 4 does not guarantee a report — if no report path resolves, or the file has no H1 in the expected format, set `{out_dir}` = `output/adhoc-{date}/` and stop there. Do not attempt to derive company or role from the JD, the tracker, or any other source.
     - Create `{out_dir}` if it does not exist. The standard filename below is identical in both branches.
-    Then run: `node patch-latex-content.mjs <source.tex> /tmp/cv-patches-{company}.json {out_dir}/cv-{candidate_slug}-{timestamp}.tex`
-8. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{timestamp}.tex {out_dir}/cv-{candidate_slug}-{timestamp}.pdf --compile-only`
+    Then run: `node patch-latex-content.mjs <source.tex> /tmp/cv-patches-{company}.json {out_dir}/cv-{candidate_slug}-{stamp}.tex`
+8. Run: `node generate-latex.mjs {out_dir}/cv-{candidate_slug}-{stamp}.tex {out_dir}/cv-{candidate_slug}-{stamp}.pdf --compile-only`
 9. Report: family, slot count, patched count, `.tex` path, `.pdf` path (or compile error)
 
 **Requires:** `tectonic` or `pdflatex` on PATH (same as `latex` mode).

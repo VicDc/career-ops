@@ -665,8 +665,8 @@ Ordered list of which Experience and Projects to include in the CV generated for
 - `(excluded)` - not emitted in the CV (off-topic for the role)
 
 **Selection rules:**
-- Company name match is case-insensitive, substring (e.g. "Acme Srl" matches "Acme Srl Srl" in cv.md)
-- Project name matches on the name before the em-dash (e.g. "Sherpa Alzheimer" matches the project with its descriptor)
+- Company name match is case-insensitive, substring (e.g. "Acme Tools" matches "Acme Tools Srl" in cv.md)
+- Project name matches on the name before the em-dash (e.g. "Project Atlas" matches the project with its descriptor)
 - If a cv.md entry is NOT mentioned here, it is included as a tail fallback (safety net)
 - Order of primary+secondary entries = emission order in the CV
 

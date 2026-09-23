@@ -5,6 +5,9 @@
  *
  * Usage:
  *   node generate-latex.mjs <input.tex> [output.pdf]
+ *   node generate-latex.mjs <input.tex> [output.pdf] --compile-only
+ *
+ * --compile-only: skip template validation; compile any user-owned .tex (latex-tex mode).
  *
  * Reads the .tex file, validates structure, compiles to PDF via tectonic, xelatex, or pdflatex.
  * If output.pdf is omitted, writes to the same directory as input with .pdf extension.
@@ -18,9 +21,12 @@ import { readFile, writeFile, stat, copyFile, rm, readdir } from 'fs/promises';
 import { resolve, basename, dirname, join } from 'path';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
-import { fileURLToPath } from 'url';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// User-layer files (cv.md, config/profile.yml, reports/) live under the data root,
+// which CAREER_OPS_DATA_DIR / .career-ops-data can move out of the repo.
+const DATA_ROOT = getCareerOpsRoot();
 
 // Escape plain text for safe insertion into a LaTeX document.
 // Order matters: backslash first, then the rest.
@@ -424,15 +430,9 @@ function formatProjectsLatex(entries) {
     .join('\n\n');
 }
 
-// Each entry is an alternation so a CV written in a language other than English
-// still validates: the check is that the ATS sections exist, not that their
-// headings are English. Add a language by extending the alternations.
-const REQUIRED_SECTIONS = [
-  '\\\\section{(Education|Formazione)}',
-  '\\\\section{(Experience|Esperienza)}',
-  '\\\\section{(Projects|Progetti)}',
-  '\\\\section{(Technical Skills|Competenze Tecniche)}',
-];
+// Sections are counted, not matched by name, so a CV in any language validates
+// (Formazione/Esperienza, Educación/Experiencia, ...) — same rule as upstream.
+const MIN_SECTIONS = 4;
 
 const REQUIRED_COMMANDS = [
   '\\\\resumeSubheading',
@@ -440,10 +440,107 @@ const REQUIRED_COMMANDS = [
   '\\\\resumeProjectHeading',
 ];
 
+// Unicode script test so supplementary-plane ideographs (U+20000+) are caught too.
+const CJK_RE = /\p{Script=Han}|\p{Script=Hiragana}|\p{Script=Katakana}|\p{Script=Hangul}/u;
+
+// xeCJK/ctex anywhere in a \usepackage list, or a ctex document class.
+const CJK_PACKAGE_RE = /\\usepackage(?:\[[^\]]*\])?\{[^}]*\b(?:xeCJK|ctex)\b[^}]*\}|\\documentclass(?:\[[^\]]*\])?\{ctex(?:art|rep|book)?\}/;
+
+// Prefer tectonic (self-contained), then xelatex (OpenType fonts like Figtree),
+// then pdflatex (legacy, no CJK).
+export function resolveLatexEngine() {
+  for (const candidate of ['tectonic', 'xelatex', 'pdflatex']) {
+    try {
+      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
+      return candidate;
+    } catch { /* not found */ }
+  }
+  return null;
+}
+
+/**
+ * Structural checks on the fully-substituted .tex.
+ * compileOnly (latex-tex mode, user-owned .tex): only document begin/end are
+ * checked — the template's sections/commands/placeholders are not required.
+ * @param {string} content
+ * @param {boolean} compileOnly
+ * @param {string|null} [engine] - 'tectonic'/'xelatex'/'pdflatex'/null; affects CJK handling
+ * @returns {{ issues: string[], counts: object }}
+ */
+export function validateLatexContent(content, compileOnly, engine = null) {
+  const issues = [];
+
+  if (!content.includes('\\begin{document}')) {
+    issues.push('Missing \\begin{document}');
+  }
+  if (!content.includes('\\end{document}')) {
+    issues.push('Missing \\end{document}');
+  }
+
+  if (compileOnly) {
+    return { issues, counts: { resumeItems: 0, subheadings: 0, projectHeadings: 0 } };
+  }
+
+  const sectionCount = (content.match(/\\section\{/g) || []).length;
+  if (sectionCount < MIN_SECTIONS) {
+    issues.push(`Expected at least ${MIN_SECTIONS} \\section{} blocks (Education, Work Experience, Projects, Skills — or localized equivalents), found ${sectionCount}`);
+  }
+
+  if (CJK_RE.test(content)) {
+    const xetex = engine === 'tectonic' || engine === 'xelatex';
+    if (xetex && CJK_PACKAGE_RE.test(content)) {
+      // XeTeX backend + xeCJK/ctex loaded: CJK renders.
+    } else if (xetex) {
+      issues.push('CJK characters detected but no CJK package (xeCJK/ctex) is loaded. Generate from the CJK-aware template instead: `node build-cv-latex.mjs <input.json> <output.tex> --template=cjk` (templates/cv-template.cjk.tex), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
+    } else {
+      issues.push('CJK characters detected. This CJK-aware LaTeX path needs a XeTeX-based engine (fontspec/xeCJK) — pdfLaTeX cannot compile it. Install tectonic (brew install tectonic) and regenerate from the CJK-aware template (`--template=cjk`), or use `pdf` mode (HTML to PDF, which renders CJK) for these CVs.');
+    }
+  }
+
+  for (const cmd of REQUIRED_COMMANDS) {
+    if (!new RegExp(cmd).test(content)) {
+      issues.push(`Missing command: ${cmd}`);
+    }
+  }
+
+  const unresolvedMatch = content.match(/\{\{[A-Z_]+\}\}/g);
+  if (unresolvedMatch) {
+    issues.push(`Unresolved placeholders: ${[...new Set(unresolvedMatch)].join(', ')}`);
+  }
+
+  let resumeItemCount = 0;
+  let subheadingCount = 0;
+  let projectHeadingCount = 0;
+  for (const line of content.split('\n')) {
+    if (/\\resumeItem\{/.test(line)) resumeItemCount++;
+    if (/\\resumeSubheading[^C]/.test(line)) subheadingCount++;
+    if (/\\resumeProjectHeading/.test(line)) projectHeadingCount++;
+  }
+
+  // pdfgentounicode — pdfTeX-only primitive for ATS-compatible glyph mapping.
+  // XeLaTeX (fontspec) crashes on it and already emits Unicode-mapped PDFs
+  // natively via its OpenType engine, so the requirement does not apply.
+  const isXeLaTeX = content.includes('\\usepackage{fontspec}');
+  if (!isXeLaTeX && !content.includes('\\pdfgentounicode=1')) {
+    issues.push('Missing \\pdfgentounicode=1 (ATS compatibility)');
+  }
+
+  return {
+    issues,
+    counts: {
+      resumeItems: resumeItemCount,
+      subheadings: subheadingCount,
+      projectHeadings: projectHeadingCount,
+    },
+  };
+}
+
 async function main() {
   // Parse positional args (skip any --flag=... tokens)
   const positional = [];
   let reportFlag = null;
+  // --compile-only: user-owned .tex (latex-tex mode) — skip template checks.
+  const compileOnly = process.argv.includes('--compile-only');
   for (const arg of process.argv.slice(2)) {
     if (arg.startsWith('--report=')) {
       reportFlag = arg.slice('--report='.length);
@@ -454,7 +551,7 @@ async function main() {
   const inputPath = positional[0];
   const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>]');
+    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--compile-only]');
     process.exit(1);
   }
 
@@ -474,7 +571,7 @@ async function main() {
   let summarySource = null;
   if (content.includes('{{SUMMARY}}')) {
     const summary = await extractTailoredSummary({
-      scriptDir: __dirname,
+      scriptDir: DATA_ROOT,
       reportFlag,
     });
     if (summary) {
@@ -491,7 +588,7 @@ async function main() {
   if (content.includes('{{CERTIFICATIONS}}')) {
     let certs = [];
     try {
-      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       certs = extractCertifications(md);
       certificationsSource = certs.length ? `cv.md:${certs.length}` : 'cv.md:empty';
     } catch {
@@ -509,7 +606,7 @@ async function main() {
   let contactLineSource = null;
   if (content.includes('{{CONTACT_LINE}}')) {
     try {
-      const yml = await readFile(resolve(__dirname, 'config/profile.yml'), 'utf-8');
+      const yml = await readFile(resolve(DATA_ROOT, 'config/profile.yml'), 'utf-8');
       const line = parseContactLine(yml);
       if (line) {
         content = content.replace(/\{\{CONTACT_LINE\}\}/g, line);
@@ -537,7 +634,7 @@ async function main() {
   let headerSource = null;
   if (HEADER_PLACEHOLDERS.some(p => content.includes(p))) {
     try {
-      const yml = await readFile(resolve(__dirname, 'config/profile.yml'), 'utf-8');
+      const yml = await readFile(resolve(DATA_ROOT, 'config/profile.yml'), 'utf-8');
       const id = parseHeaderIdentity(yml);
       const present = [id.name, id.email, id.linkedin, id.github].filter(Boolean).length;
       if (present === 4) headerSource = 'profile.yml';
@@ -567,7 +664,7 @@ async function main() {
   let skillsSource = null;
   if (content.includes('{{SKILLS}}')) {
     try {
-      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const skills = extractSkills(md);
       content = content.replace(/\{\{SKILLS\}\}/g, formatSkillsLatex(skills));
       skillsSource = skills.length ? `cv.md:${skills.length}` : 'cv.md:empty';
@@ -582,7 +679,7 @@ async function main() {
   let educationSource = null;
   if (content.includes('{{EDUCATION}}')) {
     try {
-      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const entries = extractEducation(md);
       content = content.replace(/\{\{EDUCATION\}\}/g, formatEducationLatex(entries));
       educationSource = entries.length ? `cv.md:${entries.length}` : 'cv.md:empty';
@@ -597,7 +694,7 @@ async function main() {
   // Same report resolution chain as SUMMARY: explicit --report > most recent.
   let relevanceSelection = { experience: [], projects: [] };
   if (content.includes('{{EXPERIENCE}}') || content.includes('{{PROJECTS}}')) {
-    const reportMd = await loadReportForSelection({ scriptDir: __dirname, reportFlag });
+    const reportMd = await loadReportForSelection({ scriptDir: DATA_ROOT, reportFlag });
     if (reportMd) relevanceSelection = extractRelevanceSelection(reportMd);
   }
 
@@ -606,7 +703,7 @@ async function main() {
   let experienceSelected = null;
   if (content.includes('{{EXPERIENCE}}')) {
     try {
-      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const all = extractExperience(md);
       experienceSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
       const { ordered, info } = applySelection(all, relevanceSelection.experience, e => e.company);
@@ -626,7 +723,7 @@ async function main() {
   let projectsSelected = null;
   if (content.includes('{{PROJECTS}}')) {
     try {
-      const md = await readFile(resolve(__dirname, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const all = extractProjects(md);
       projectsSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
       const { ordered, info } = applySelection(all, relevanceSelection.projects, p => p.name);
@@ -641,55 +738,9 @@ async function main() {
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
 
-  const issues = [];
-
-  // Check required sections
-  for (const pattern of REQUIRED_SECTIONS) {
-    if (!new RegExp(pattern).test(content)) {
-      issues.push(`Missing section matching: ${pattern}`);
-    }
-  }
-
-  // Check required commands are used
-  for (const cmd of REQUIRED_COMMANDS) {
-    if (!new RegExp(cmd).test(content)) {
-      issues.push(`Missing command: ${cmd}`);
-    }
-  }
-
-  // Check document structure
-  if (!content.includes('\\begin{document}')) {
-    issues.push('Missing \\begin{document}');
-  }
-  if (!content.includes('\\end{document}')) {
-    issues.push('Missing \\end{document}');
-  }
-
-  // Check for unresolved placeholders
-  const unresolvedMatch = content.match(/\{\{[A-Z_]+\}\}/g);
-  if (unresolvedMatch) {
-    issues.push(`Unresolved placeholders: ${[...new Set(unresolvedMatch)].join(', ')}`);
-  }
-
-  // Check for common unescaped special chars in text (heuristic)
-  const lines = content.split('\n');
-  let resumeItemCount = 0;
-  let subheadingCount = 0;
-  let projectHeadingCount = 0;
-
-  for (const line of lines) {
-    if (/\\resumeItem\{/.test(line)) resumeItemCount++;
-    if (/\\resumeSubheading[^C]/.test(line)) subheadingCount++;
-    if (/\\resumeProjectHeading/.test(line)) projectHeadingCount++;
-  }
-
-  // Check pdfgentounicode — pdfTeX-only primitive for ATS-compatible glyph
-  // mapping. XeLaTeX (fontspec) crashes on it and already emits Unicode-mapped
-  // PDFs natively via its OpenType engine, so the requirement does not apply.
-  const isXeLaTeX = content.includes('\\usepackage{fontspec}');
-  if (!isXeLaTeX && !content.includes('\\pdfgentounicode=1')) {
-    issues.push('Missing \\pdfgentounicode=1 (ATS compatibility)');
-  }
+  // Engine first: the CJK check depends on it.
+  const engine = resolveLatexEngine();
+  const { issues, counts } = validateLatexContent(content, compileOnly, engine);
 
   const fileInfo = await stat(absPath);
   const sizeKB = (fileInfo.size / 1024).toFixed(1);
@@ -699,13 +750,10 @@ async function main() {
     file: basename(absPath),
     path: absPath,
     sizeKB: parseFloat(sizeKB),
-    counts: {
-      resumeItems: resumeItemCount,
-      subheadings: subheadingCount,
-      projectHeadings: projectHeadingCount,
-    },
+    counts,
     issues,
     valid: issues.length === 0,
+    ...(compileOnly && { compileOnly }),
     ...(summarySource && { summarySource }),
     ...(certificationsSource && { certificationsSource }),
     ...(contactLineSource && { contactLineSource }),
@@ -734,18 +782,6 @@ async function main() {
   const targetDir = dirname(targetPdf);
   if (!existsSync(targetDir)) {
     mkdirSync(targetDir, { recursive: true });
-  }
-
-  // Detect available engine: prefer tectonic (modern, self-contained),
-  // fall back to xelatex (needed for OpenType fonts like Figtree),
-  // then to pdflatex (legacy)
-  let engine = null;
-  for (const candidate of ['tectonic', 'xelatex', 'pdflatex']) {
-    try {
-      execFileSync(candidate, ['--version'], { stdio: 'pipe' });
-      engine = candidate;
-      break;
-    } catch { /* not found */ }
   }
 
   if (!engine) {
@@ -894,4 +930,4 @@ async function main() {
   process.exit(report.compiled ? 0 : 1);
 }
 
-main();
+if (isMainModule(import.meta.url)) main();

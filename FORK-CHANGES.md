@@ -72,5 +72,8 @@ nascita, nazionalità). Nel fork c'è solo la regola `.gitignore`
 1. ~~**Template del fork incompatibile con `build-cv-latex.mjs` di upstream.**~~
    Risolto il 2026-09-23 spostando il template in `templates-fork/`.
 2. ~~**Summary preso dal report più recente.**~~ Risolto il 2026-09-23 (`e64490b`).
-3. **Soglia `\Needspace*` troppo alta** (vedi `0af00b4`).
+3. ~~**Soglia `\Needspace*` troppo alta.**~~ Verificato il 2026-09-23 su 8 CV
+   (5 report, EN e IT): soglie 11, 8 e 6 danno lo stesso risultato, 2 pagine e
+   nessun titolo orfano. La pagina 3 dipendeva dalla lunghezza del CV, risolta
+   con i limiti sui bullet. Nessuna modifica.
 4. ~~**Sostituzioni con `String.replace` a stringa.**~~ Risolto il 2026-09-23 (`e64490b`). Lo stesso errore ha corrotto questo file durante l'aggiornamento: prova che il rischio è reale.

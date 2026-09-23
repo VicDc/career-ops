@@ -6,7 +6,7 @@
 // selector that matches nothing becomes a validation issue instead of a
 // silently missing bullet.
 import { pass, fail } from './helpers.mjs';
-import { extractRelevanceSelection, pickBullets } from '../generate-latex.mjs';
+import { extractRelevanceSelection, pickBullets, guessLanguage, checkParity } from '../generate-latex.mjs';
 
 const check = (label, ok, detail = '') => (ok ? pass(label) : fail(`${label} ${detail}`));
 
@@ -58,3 +58,23 @@ check('unknown selector is an issue', issues.length === 1 && /Led a team/.test(i
 issues = [];
 const over = pickBullets(expBullets, ['Delivered rollout', 'Delivered customer', 'Cut', 'Grew'], b => b, 3, 'Acme', issues);
 check('more picks than max: capped and reported', over.length === 3 && issues.some(i => /max 3/.test(i)), JSON.stringify(issues));
+
+// --- Two-language CV (--lang): summary language guess and cv.it.md parity ---
+check('Italian summary detected as it',
+  guessLanguage('Ingegnere software con esperienza su pipeline di dati e sistemi di raccomandazione per il settore retail, con team distribuiti.') === 'it');
+check('English summary detected as en',
+  guessLanguage('Software engineer with five years of experience building data pipelines and recommendation systems for retail teams.') === 'en');
+
+const en = [{ bullets: ['a', 'b'] }, { bullets: ['c'] }];
+issues = [];
+checkParity(en, en, e => e.bullets.length, 'Experience', 'cv.md', issues);
+check('same file: no parity issue', issues.length === 0);
+issues = [];
+checkParity(en, [{ bullets: ['a', 'b'] }, { bullets: ['c'] }], e => e.bullets.length, 'Experience', 'cv.it.md', issues);
+check('mirrored file: no parity issue', issues.length === 0, JSON.stringify(issues));
+issues = [];
+checkParity(en, [{ bullets: ['a'] }, { bullets: ['c'] }], e => e.bullets.length, 'Experience', 'cv.it.md', issues);
+check('missing bullet in cv.it.md is an issue', issues.length === 1 && /entry 1 has 1 bullets, cv.md has 2/.test(issues[0]), JSON.stringify(issues));
+issues = [];
+checkParity(en, [{ bullets: ['a', 'b'] }], e => e.bullets.length, 'Experience', 'cv.it.md', issues);
+check('missing entry in cv.it.md is an issue', issues.length === 1 && /1 entries, cv.md has 2/.test(issues[0]), JSON.stringify(issues));

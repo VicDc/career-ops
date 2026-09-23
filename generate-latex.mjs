@@ -28,6 +28,43 @@ import { isMainModule } from './lib/is-main-module.mjs';
 // which CAREER_OPS_DATA_DIR / .career-ops-data can move out of the repo.
 const DATA_ROOT = getCareerOpsRoot();
 
+// CV language (--lang=). cv.md stays the source of truth for WHICH entries and
+// bullets are printed (the report's selectors point into it); the language file
+// supplies the text at the same position, so it must mirror cv.md entry by entry.
+const CV_FILES = { en: 'cv.md', it: 'cv.it.md' };
+const SECTION_TITLES = {
+  it: { Summary: 'Profilo', Projects: 'Progetti', Experience: 'Esperienza', 'Technical Skills': 'Competenze Tecniche', Education: 'Formazione', Certifications: 'Certificazioni' },
+};
+const BABEL = { en: 'english', it: 'italian' };
+const COUNTRY = { it: { Italy: 'Italia' } };
+
+// ponytail: stopword count. Enough to tell an Italian CV paragraph from an
+// English one; a third language needs a real detector.
+const STOPWORDS = {
+  it: ['di', 'e', 'il', 'la', 'le', 'che', 'per', 'con', 'un', 'una', 'del', 'della', 'nel', 'nella', 'su', 'sul', 'da', 'non'],
+  en: ['the', 'and', 'of', 'with', 'to', 'for', 'on', 'across', 'from', 'by', 'is', 'that'],
+};
+export function guessLanguage(text) {
+  const words = String(text).toLowerCase().match(/[a-zàèéìòù]+/g) || [];
+  const count = l => words.filter(w => STOPWORDS[l].includes(w)).length;
+  return count('it') > count('en') ? 'it' : 'en';
+}
+
+// The language file must have the same entries and bullet counts as cv.md,
+// in the same order, or a report selector would print the wrong bullet.
+export function checkParity(en, out, countOf, section, file, issues) {
+  if (en === out) return;
+  if (en.length !== out.length) {
+    issues.push(`${file}: ${section} has ${out.length} entries, cv.md has ${en.length}`);
+    return;
+  }
+  en.forEach((e, i) => {
+    if (countOf(e) !== countOf(out[i])) {
+      issues.push(`${file}: ${section} entry ${i + 1} has ${countOf(out[i])} bullets, cv.md has ${countOf(e)}`);
+    }
+  });
+}
+
 // Escape plain text for safe insertion into a LaTeX document.
 // Order matters: backslash first, then the rest.
 function escapeLatex(s) {
@@ -63,25 +100,29 @@ function firstParagraph(body) {
   return null;
 }
 
-// Source chain: explicit --report > cv.md.
-async function extractTailoredSummary({ scriptDir, reportFlag }) {
+// Source chain: report "## Tailored CV Summary (<lang>)" > report
+// "## Tailored CV Summary" if it is written in <lang> > the CV file's Summary.
+async function extractTailoredSummary({ scriptDir, reportFlag, lang, cvFile }) {
+  let skipped = '';
   if (reportFlag) {
     try {
       const md = await readFile(resolve(reportFlag), 'utf-8');
-      const body = extractMarkdownSection(md, /^##\s+Tailored CV Summary\s*$/m)
-        || extractMarkdownSection(md, /^##\s+Summary\s*$/m);
-      const text = firstParagraph(body);
-      if (text) return { text, source: `report:${reportFlag}` };
+      const tagged = firstParagraph(extractMarkdownSection(md, new RegExp(`^##\\s+Tailored CV Summary \\(${lang}\\)\\s*$`, 'm')));
+      if (tagged) return { text: tagged, source: `report:${reportFlag}:${lang}` };
+      const plain = firstParagraph(extractMarkdownSection(md, /^##\s+Tailored CV Summary\s*$/m)
+        || extractMarkdownSection(md, /^##\s+Summary\s*$/m));
+      if (plain && guessLanguage(plain) === lang) return { text: plain, source: `report:${reportFlag}` };
+      if (plain) skipped = ` (report summary is not in ${lang})`;
     } catch { /* fall through */ }
   }
 
   // No --report: use cv.md. Guessing "the most recent report" put another
   // offer's summary (in another language) into the CV.
   try {
-    const md = await readFile(resolve(scriptDir, 'cv.md'), 'utf-8');
+    const md = await readFile(resolve(scriptDir, cvFile), 'utf-8');
     const body = extractMarkdownSection(md, /^##\s+Summary\s*$/m);
     const text = firstParagraph(body);
-    if (text) return { text, source: 'cv.md' };
+    if (text) return { text, source: cvFile + skipped };
   } catch { /* nothing */ }
 
   return null;
@@ -544,11 +585,14 @@ async function main() {
   // Parse positional args (skip any --flag=... tokens)
   const positional = [];
   let reportFlag = null;
+  let lang = 'en';
   // --compile-only: user-owned .tex (latex-tex mode) — skip template checks.
   const compileOnly = process.argv.includes('--compile-only');
   for (const arg of process.argv.slice(2)) {
     if (arg.startsWith('--report=')) {
       reportFlag = arg.slice('--report='.length);
+    } else if (arg.startsWith('--lang=')) {
+      lang = arg.slice('--lang='.length);
     } else if (!arg.startsWith('--')) {
       positional.push(arg);
     }
@@ -556,13 +600,23 @@ async function main() {
   const inputPath = positional[0];
   const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--compile-only]');
+    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--lang=en|it] [--compile-only]');
     process.exit(1);
   }
 
   // A mistyped --report must fail, not silently fall back to cv.md.
   if (reportFlag && !existsSync(resolve(reportFlag))) {
     console.error(`Report not found: ${reportFlag}`);
+    process.exit(1);
+  }
+
+  const cvFile = CV_FILES[lang];
+  if (!cvFile) {
+    console.error(`Unknown --lang=${lang}. Supported: ${Object.keys(CV_FILES).join(', ')}`);
+    process.exit(1);
+  }
+  if (!compileOnly && !existsSync(resolve(DATA_ROOT, cvFile))) {
+    console.error(`${cvFile} not found in ${DATA_ROOT}: --lang=${lang} needs it`);
     process.exit(1);
   }
 
@@ -577,13 +631,15 @@ async function main() {
 
   // --- {{SUMMARY}} substitution (pre-validation) ---
   // Runs only if the .tex still contains the placeholder. Source chain:
-  //   --report=<path> ("## Tailored CV Summary") > cv.md "## Summary"
+  //   report "Tailored CV Summary (<lang>)" > plain one in <lang> > CV file "## Summary"
   // Mutates the input .tex in place so xelatex consumes the resolved file.
   let summarySource = null;
   if (content.includes('{{SUMMARY}}')) {
     const summary = await extractTailoredSummary({
       scriptDir: DATA_ROOT,
       reportFlag,
+      lang,
+      cvFile,
     });
     if (summary) {
       content = content.replace(/\{\{SUMMARY\}\}/g, () => escapeLatex(summary.text));
@@ -599,11 +655,11 @@ async function main() {
   if (content.includes('{{CERTIFICATIONS}}')) {
     let certs = [];
     try {
-      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, cvFile), 'utf-8');
       certs = extractCertifications(md);
-      certificationsSource = certs.length ? `cv.md:${certs.length}` : 'cv.md:empty';
+      certificationsSource = certs.length ? `${cvFile}:${certs.length}` : `${cvFile}:empty`;
     } catch {
-      certificationsSource = 'cv.md:missing';
+      certificationsSource = `${cvFile}:missing`;
     }
     const rendered = formatCertificationsLatex(certs);
     content = content.replace(/\{\{CERTIFICATIONS\}\}/g, () => rendered);
@@ -618,7 +674,10 @@ async function main() {
   if (content.includes('{{CONTACT_LINE}}')) {
     try {
       const yml = await readFile(resolve(DATA_ROOT, 'config/profile.yml'), 'utf-8');
-      const line = parseContactLine(yml);
+      let line = parseContactLine(yml);
+      for (const [from, to] of Object.entries(COUNTRY[lang] || {})) {
+        if (line) line = line.replace(new RegExp(`, ${from}$`), `, ${to}`);
+      }
       if (line) {
         content = content.replace(/\{\{CONTACT_LINE\}\}/g, () => line);
         // template intentionally NOT mutated; final content is compiled from a working copy (see below)
@@ -675,12 +734,12 @@ async function main() {
   let skillsSource = null;
   if (content.includes('{{SKILLS}}')) {
     try {
-      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, cvFile), 'utf-8');
       const skills = extractSkills(md);
       content = content.replace(/\{\{SKILLS\}\}/g, () => formatSkillsLatex(skills));
-      skillsSource = skills.length ? `cv.md:${skills.length}` : 'cv.md:empty';
+      skillsSource = skills.length ? `${cvFile}:${skills.length}` : `${cvFile}:empty`;
     } catch {
-      skillsSource = 'cv.md:missing';
+      skillsSource = `${cvFile}:missing`;
       content = content.replace(/\{\{SKILLS\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
@@ -690,12 +749,12 @@ async function main() {
   let educationSource = null;
   if (content.includes('{{EDUCATION}}')) {
     try {
-      const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
+      const md = await readFile(resolve(DATA_ROOT, cvFile), 'utf-8');
       const entries = extractEducation(md);
       content = content.replace(/\{\{EDUCATION\}\}/g, () => formatEducationLatex(entries));
-      educationSource = entries.length ? `cv.md:${entries.length}` : 'cv.md:empty';
+      educationSource = entries.length ? `${cvFile}:${entries.length}` : `${cvFile}:empty`;
     } catch {
-      educationSource = 'cv.md:missing';
+      educationSource = `${cvFile}:missing`;
       content = content.replace(/\{\{EDUCATION\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
@@ -717,14 +776,21 @@ async function main() {
     try {
       const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const all = extractExperience(md);
-      experienceSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
+      const out = cvFile === 'cv.md' ? all : extractExperience(await readFile(resolve(DATA_ROOT, cvFile), 'utf-8'));
+      checkParity(all, out, e => e.bullets.length, 'Experience', cvFile, selectionIssues);
+      all.forEach((e, i) => { e.idx = i; });
+      experienceSource = all.length ? `${cvFile}:${all.length}` : `${cvFile}:empty`;
       const { ordered, info } = applySelection(all, relevanceSelection.experience, e => `${e.company} ${e.role}`);
       if (relevanceSelection.experience.length) {
         experienceSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => formatExperienceLatex(ordered.map(e => ({ ...e, bullets: pickBullets(e.bullets, e.pick, b => b, MAX_EXPERIENCE_BULLETS, e.role, selectionIssues) }))));
+      content = content.replace(/\{\{EXPERIENCE\}\}/g, () => formatExperienceLatex(ordered.map(e => {
+        const picked = pickBullets(e.bullets, e.pick, b => b, MAX_EXPERIENCE_BULLETS, e.role, selectionIssues);
+        const o = out[e.idx] ?? e;
+        return { ...o, bullets: picked.map(b => o.bullets[e.bullets.indexOf(b)] ?? b) };
+      })));
     } catch {
-      experienceSource = 'cv.md:missing';
+      experienceSource = `${cvFile}:missing`;
       content = content.replace(/\{\{EXPERIENCE\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
@@ -737,18 +803,33 @@ async function main() {
     try {
       const md = await readFile(resolve(DATA_ROOT, 'cv.md'), 'utf-8');
       const all = extractProjects(md);
-      projectsSource = all.length ? `cv.md:${all.length}` : 'cv.md:empty';
+      const out = cvFile === 'cv.md' ? all : extractProjects(await readFile(resolve(DATA_ROOT, cvFile), 'utf-8'));
+      checkParity(all, out, p => p.metaBullets.length, 'Projects', cvFile, selectionIssues);
+      all.forEach((p, i) => { p.idx = i; });
+      projectsSource = all.length ? `${cvFile}:${all.length}` : `${cvFile}:empty`;
       const { ordered, info } = applySelection(all, relevanceSelection.projects, p => p.name);
       if (relevanceSelection.projects.length) {
         projectsSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
-      content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => ({ ...p, metaBullets: pickBullets(p.metaBullets, p.pick, mb => mb.key, MAX_PROJECT_BULLETS, p.name, selectionIssues) }))));
+      content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => {
+        const picked = pickBullets(p.metaBullets, p.pick, mb => mb.key, MAX_PROJECT_BULLETS, p.name, selectionIssues);
+        const o = out[p.idx] ?? p;
+        return { ...o, metaBullets: picked.map(mb => o.metaBullets[p.metaBullets.indexOf(mb)] ?? mb) };
+      })));
     } catch {
-      projectsSource = 'cv.md:missing';
+      projectsSource = `${cvFile}:missing`;
       content = content.replace(/\{\{PROJECTS\}\}/g, () => '');
     }
     // template intentionally NOT mutated; final content is compiled from a working copy (see below)
   }
+
+  // Section titles and hyphenation follow the CV language; the template is
+  // written once, in English.
+  const titles = SECTION_TITLES[lang];
+  if (titles) {
+    content = content.replace(/\\section\{([^}]+)\}/g, (m, t) => (titles[t] ? `\\section{${titles[t]}}` : m));
+  }
+  content = content.replace(/\\usepackage\[english\]\{babel\}/, () => `\\usepackage[${BABEL[lang]}]{babel}`);
 
   // Engine first: the CJK check depends on it.
   const engine = resolveLatexEngine();
@@ -766,6 +847,7 @@ async function main() {
     counts,
     issues,
     valid: issues.length === 0,
+    lang,
     ...(compileOnly && { compileOnly }),
     ...(summarySource && { summarySource }),
     ...(certificationsSource && { certificationsSource }),

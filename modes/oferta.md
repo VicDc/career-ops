@@ -748,8 +748,11 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Relevance Selection (for CV generation)
 (ordered list of Experience and Projects with primary/secondary/excluded tags - see instruction block)
 
-## Tailored CV Summary
-(one paragraph, 3-4 sentences, in the JD language, keyword-injected, plain text - drop-in for {{SUMMARY}})
+## Tailored CV Summary (en)
+(one paragraph, 3-4 sentences, English, keyword-injected, plain text - drop-in for {{SUMMARY}} of the English CV)
+
+## Tailored CV Summary (it)
+(same paragraph written in Italian, not translated word by word - drop-in for {{SUMMARY}} of the Italian CV. Write it when the JD is in Italian or the employer is Italian; omit it otherwise)
 
 ## H) Draft Application Answers
 (only if score >= 4.5 — draft answers for the application form)

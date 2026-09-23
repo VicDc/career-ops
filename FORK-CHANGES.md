@@ -31,7 +31,7 @@ Stato upstream:
 | 2026-09-23 | `d42495c` | Titoli di sezione in italiano accettati dal validatore; cartella di output per report. | CV in italiano rifiutati. | **superato** per i titoli (upstream conta le sezioni, qualsiasi lingua); cartella per report **proponibile**. |
 | 2026-09-23 | `d6d712b` | `--compile-only` rispettato; sezioni contate come upstream; guard CJK; `main()` solo come entry point; file utente letti dalla data root. | `latex-tex` rifiutava i `.tex` scritti a mano; importare il modulo interrompeva `test-all.mjs` alla sezione 20a. | **superato**: allinea il fork a upstream. |
 
-| 2026-09-23 | _questo commit_ | Template del fork spostato in `templates-fork/cv-template.tex`; `templates/cv-template.tex` torna quello di upstream. Mode `latex`/`latex-tex` aggiornati. Output verificato identico (stesso `.tex` di lavoro, byte per byte). | Il template del fork rompeva `build-cv-latex.mjs` e i test dei template di upstream. Fuori da `templates/` nessun test di upstream lo intercetta, e `--template=<nome>` non lo sceglie per sbaglio. | **solo fork** |
+| 2026-09-23 | `246c8db` | Template del fork spostato in `templates-fork/cv-template.tex`; `templates/cv-template.tex` torna quello di upstream. Mode `latex`/`latex-tex` aggiornati. Output verificato identico (stesso `.tex` di lavoro, byte per byte). | Il template del fork rompeva `build-cv-latex.mjs` e i test dei template di upstream. Fuori da `templates/` nessun test di upstream lo intercetta, e `--template=<nome>` non lo sceglie per sbaglio. | **solo fork** |
 
 Il CV Europass (barra laterale, paracol, foto) vive fuori dal progetto ed è
 aggiornato a mano: non è nel fork, per scelta (`modes/_custom.md`).

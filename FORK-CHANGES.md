@@ -38,7 +38,7 @@ Stato upstream:
 Il CV Europass (barra laterale, paracol, foto) è un formato standard dal
 2026-09-23: il master sta in `europass/`, **gitignored** (foto, data di
 nascita, nazionalità). Nel fork c'è solo la regola `.gitignore`
-(commit _questo commit_); il file non verrà mai pubblicato. Regole d'uso in
+(commit `ad9dab8`); il file non verrà mai pubblicato. Regole d'uso in
 `modes/_custom.md`.
 
 ## Tracker

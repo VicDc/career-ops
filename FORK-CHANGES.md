@@ -19,6 +19,7 @@ Stato upstream:
 |------|--------|----------|------|
 | 2026-09-03 | `ece5df7` | 1.31.0 | Merge. Nel conflitto su `generate-latex.mjs` è stata tenuta la versione del fork: persi `--compile-only`, validazione multilingua e guard CJK di upstream (recuperati in `4c1a354`). |
 | 2026-09-23 | `5148a42` | 1.33.0 | Merge. Conflitti su `merge-tracker.mjs` (tenuti gli snapshot del fork + `DATA_ROOT` di upstream) e `package.json` (presa la versione upstream di `serve:dashboard`). Backup completo pre-merge: `C:\GitHub\career-ops_backup_2026-09-23_pre-1.33`. |
+| 2026-09-26 | — | 1.34.0 | Merge del tag `career-ops-v1.34.0` (non `update-system apply`, che avrebbe lasciato 12 file del fork alla versione vecchia). Unico conflitto su `.gitignore`: tenuta la versione del fork, più `*.tmp*` (file temporanei con copie di cv.md/profile.yml) e `node_modules` senza slash (richiesto da un test upstream). `merge-tracker.mjs`, `modes/oferta.md`, `scan.mjs`, `scan-ats-full.mjs` uniti senza conflitti, modifiche del fork conservate. Backup: tag `backup-pre-1.34-2026-09-25` e copia `C:\GitHub\career-ops_backup_2026-09-25_pre-1.34`. |
 
 ## CV LaTeX
 

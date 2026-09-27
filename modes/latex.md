@@ -29,6 +29,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
     - `{lang}` = the CV language from step 5: `en` (default) or `it`. For an Italian CV add `-it` to `{stamp}` so both versions can sit in the same `{out_dir}`.
     - `--lang=it` prints the text of `cv.it.md` (Italian mirror of `cv.md`), Italian section titles, and the report's `## Tailored CV Summary (it)`. Entries and bullets are still chosen on `cv.md` through the report's Relevance Selection, so the same report drives both languages.
     - If the report has no summary in `{lang}`, the CV file's own Summary is used and `summarySource` says so; write the missing `Tailored CV Summary ({lang})` in the report and regenerate.
+    - `--project-bullets=N` (1-5, default 2) raises the per-project bullet cap for this CV only, when the user asks for it. A report `bullets:` line that picks more than N is an error.
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
 **Requires:** `tectonic` (preferred — `brew install tectonic`, auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live) on PATH.

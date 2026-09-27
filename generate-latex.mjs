@@ -586,6 +586,8 @@ async function main() {
   const positional = [];
   let reportFlag = null;
   let lang = 'en';
+  // --project-bullets=N: raise the per-project cap for one CV (default stays 2).
+  let projectBullets = MAX_PROJECT_BULLETS;
   // --compile-only: user-owned .tex (latex-tex mode) — skip template checks.
   const compileOnly = process.argv.includes('--compile-only');
   for (const arg of process.argv.slice(2)) {
@@ -593,6 +595,12 @@ async function main() {
       reportFlag = arg.slice('--report='.length);
     } else if (arg.startsWith('--lang=')) {
       lang = arg.slice('--lang='.length);
+    } else if (arg.startsWith('--project-bullets=')) {
+      projectBullets = Number(arg.slice('--project-bullets='.length));
+      if (!Number.isInteger(projectBullets) || projectBullets < 1 || projectBullets > 5) {
+        console.error('--project-bullets must be an integer from 1 to 5');
+        process.exit(1);
+      }
     } else if (!arg.startsWith('--')) {
       positional.push(arg);
     }
@@ -600,7 +608,7 @@ async function main() {
   const inputPath = positional[0];
   const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--lang=en|it] [--compile-only]');
+    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--lang=en|it] [--project-bullets=N] [--compile-only]');
     process.exit(1);
   }
 
@@ -812,7 +820,7 @@ async function main() {
         projectsSelected = `selected:${info.selected}+fallback:${info.fallback}`;
       }
       content = content.replace(/\{\{PROJECTS\}\}/g, () => formatProjectsLatex(ordered.slice(0, MAX_PROJECTS).map(p => {
-        const picked = pickBullets(p.metaBullets, p.pick, mb => mb.key, MAX_PROJECT_BULLETS, p.name, selectionIssues);
+        const picked = pickBullets(p.metaBullets, p.pick, mb => mb.key, projectBullets, p.name, selectionIssues);
         const o = out[p.idx] ?? p;
         return { ...o, metaBullets: picked.map(mb => o.metaBullets[p.metaBullets.indexOf(mb)] ?? mb) };
       })));

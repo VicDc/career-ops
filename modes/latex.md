@@ -53,6 +53,8 @@ The template at `templates-fork/cv-template.tex` uses `{{PLACEHOLDER}}` syntax:
 | `{{PROJECTS}}` | LaTeX `\resumeProjectHeading` + `\resumeItem` blocks — top 3-4 selected |
 | `{{SKILLS}}` | LaTeX `\textbf{Category}{: items}` lines from cv.md Technical Skills |
 
+**No `candidate.title` equivalent here yet.** `pdf` mode (HTML → PDF) reads an optional professional-headline field, `candidate.title`, from `config/profile.yml` and renders it under the name. This template and `build-cv-latex.mjs` have no corresponding concept — a `title` set for `pdf` mode does nothing for `latex`/`latex-tex` output. Use `pdf` mode if the headline matters for this application.
+
 ## LaTeX Content Generation Rules
 
 ### Education

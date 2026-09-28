@@ -33,6 +33,9 @@ batch/batch-state-recovery.d/
 batch/batch-input.tsv
 batch/tracker-additions/**/*.tsv
 !batch/tracker-additions/.gitkeep
+# Worker scratch: prefetched JD text plus whatever compile cache the worker CLI
+# drops here. Fetched postings are user data — never stage them.
+batch/tmp/
 jds/*
 !jds/.gitkeep
 config/profile_vicio-dc.txt
@@ -236,6 +239,7 @@ documents/*
 # Intake fingerprints — the recorded source filenames may themselves carry
 # PII (e.g. cv/jane-doe-master-cv.pdf). #1723
 data/intake-state.json
+data/agent-inbox.md
 
 # Europass master CV (photo, date of birth, nationality): personal data, never commit
 /europass/

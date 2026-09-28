@@ -23,6 +23,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 
 // User-layer files (cv.md, config/profile.yml, reports/) live under the data root,
 // which CAREER_OPS_DATA_DIR / .career-ops-data can move out of the repo.
@@ -581,7 +582,23 @@ export function validateLatexContent(content, compileOnly, engine = null) {
   };
 }
 
+// ── CLI flags + help ──────────────────────────────────────
+
+const KNOWN_FLAGS = ['--compile-only', '--report', '--lang', '--project-bullets', '--help', '-h'];
+const VALUE_FLAGS = ['--report', '--lang', '--project-bullets'];
+
+const USAGE = `Usage:
+  node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--lang=en|it] [--project-bullets=N]
+                                                                   # validate career-ops template structure, then compile
+  node generate-latex.mjs <input.tex> [output.pdf] --compile-only  # skip template validation; compile any user-owned .tex (latex-tex mode)
+  node generate-latex.mjs --help|-h                                # print this usage block and exit
+
+Requires tectonic (preferred) or pdflatex on PATH.`;
+
 async function main() {
+  // Unknown or mistyped flags fail fast instead of becoming a path (upstream #4446).
+  validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
+
   // Parse positional args (skip any --flag=... tokens)
   const positional = [];
   let reportFlag = null;
@@ -608,7 +625,7 @@ async function main() {
   const inputPath = positional[0];
   const outputPath = positional[1]; // optional
   if (!inputPath) {
-    console.error('Usage: node generate-latex.mjs <input.tex> [output.pdf] [--report=<path>] [--lang=en|it] [--project-bullets=N] [--compile-only]');
+    console.error(USAGE);
     process.exit(1);
   }
 

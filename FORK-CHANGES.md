@@ -50,7 +50,7 @@ nascita, nazionalità). Nel fork c'è solo la regola `.gitignore`
 | Data | Commit | Modifica | Perché | Stato upstream |
 |------|--------|----------|--------|----------------|
 | 2026-09-23 | `0a3adeb` | `merge-tracker.mjs` copia il tracker in `data/backups/` prima di ogni scrittura, rotazione 20, con test. | Il tracker non ha storia git (`data/*` è ignorato): un merge sbagliato non era recuperabile. | **proponibile** |
-| 2026-09-28 | — | Test: `--backfill-urls` fa lo snapshot prima di aggiungere la colonna URL. Verificato che fallisce se il backfill torna a scrivere con `writeFileAtomic()` diretto, come in upstream. | Il merge del 28/09 ha portato il backfill dentro `writeTracker()`; senza test un merge futuro può riportarlo fuori senza che nessuno se ne accorga. | **proponibile**, insieme a `0a3adeb` |
+| 2026-09-28 | `982cb72` | Test: `--backfill-urls` fa lo snapshot prima di aggiungere la colonna URL. Verificato che fallisce se il backfill torna a scrivere con `writeFileAtomic()` diretto, come in upstream. | Il merge del 28/09 ha portato il backfill dentro `writeTracker()`; senza test un merge futuro può riportarlo fuori senza che nessuno se ne accorga. | **proponibile**, insieme a `0a3adeb` |
 
 ## Liveness e scansione
 

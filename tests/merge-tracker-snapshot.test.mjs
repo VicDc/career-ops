@@ -223,6 +223,33 @@ try {
       rmSync(ws.work, { recursive: true, force: true });
     }
   }
+
+  // --- 5. --backfill-urls snapshots before it changes the schema -----------
+  // Upstream's --backfill-urls wrote with writeFileAtomic() directly, which
+  // would add the URL column with no copy of the table before it. The
+  // 2026-09-28 merge routed it through writeTracker(); this keeps it there.
+  {
+    const ws = makeWorkspace('cops-snap-backfill-');
+    try {
+      const before = seedTracker(ws);
+      runMerge(ws, ['--backfill-urls']);
+      const files = snapshots(ws);
+      const after = readFileSync(ws.tracker, 'utf-8');
+
+      if (/\| URL \|/.test(after) && !/\| URL \|/.test(before)) {
+        pass('--backfill-urls added the URL column');
+      } else {
+        fail('--backfill-urls did not add the URL column, so the snapshot assertion proves nothing');
+      }
+      if (files.length === 1 && readFileSync(join(ws.backups, files[0]), 'utf-8') === before) {
+        pass('--backfill-urls snapshots the pre-migration table');
+      } else {
+        fail(`--backfill-urls left [${files.join(', ')}], want one snapshot of the pre-migration table`);
+      }
+    } finally {
+      rmSync(ws.work, { recursive: true, force: true });
+    }
+  }
 } catch (e) {
   fail(`merge-tracker snapshot tests crashed: ${e.message}`);
 }
